@@ -1,0 +1,21 @@
+services:
+  auth_service:
+    environment:
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ALLOWED_ORIGINS: http://localhost:7050,http://localhost:7051,http://localhost:7060
+  hot_storage:
+    environment:
+      ALLOWED_ORIGINS: http://localhost:7050,http://localhost:7051,http://localhost:7060
+  # Docker Compose <2.24 does not support `restart: true` in depends_on.
+  # Override depends_on for iframe and iframe-sample to drop that field.
+  iframe:
+    depends_on:
+      auth_service:
+        condition: service_started
+  iframe-sample:
+    depends_on:
+      auth_service:
+        condition: service_started
+      iframe:
+        condition: service_started

@@ -1,0 +1,18 @@
+diff --git a/auth_service/src/server.ts b/auth_service/src/server.ts
+index bd37c27..8ab7866 100644
+--- a/auth_service/src/server.ts
++++ b/auth_service/src/server.ts
+@@ -59,6 +59,13 @@ export const auth = betterAuth({
+       },
+     }),
+   ],
++  socialProviders: process.env["GOOGLE_CLIENT_ID"] ? {
++    google: {
++      clientId: process.env["GOOGLE_CLIENT_ID"]!,
++      clientSecret: process.env["GOOGLE_CLIENT_SECRET"]!,
++      prompt: "select_account",
++    },
++  } : undefined,
+   emailAndPassword: {
+     enabled: true,
+   },

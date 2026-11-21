@@ -1,0 +1,11 @@
+.env.opensigner
+.env.google
+.env.combined
+web/.env.local
+web/.next/
+web/node_modules/
+web/test-results/
+web/playwright-report/
+web/tsconfig.tsbuildinfo
+vendor/opensigner/
+node_modules/
