@@ -21,6 +21,7 @@ interface WalletData {
 
 const HOT_URL = process.env["NEXT_PUBLIC_HOT_STORAGE_URL"] ?? "http://localhost:7054";
 const DEV_LOGIN = process.env["NEXT_PUBLIC_DEV_EMAIL_LOGIN"] === "true";
+const ENABLE_SEND = process.env["NEXT_PUBLIC_ENABLE_SEND"] === "true";
 
 function trunc(s: string | undefined | null, n = 8) {
   if (!s) return "(empty)";
@@ -499,6 +500,26 @@ export default function WalletWidget() {
                 </div>
               )}
             </div>
+
+            {/* Send ETH note */}
+            {ENABLE_SEND && (
+              <div className="border-t pt-3">
+                <p className="text-xs font-medium text-gray-500 mb-1">Send ETH</p>
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                  This wallet is an ERC-4337 smart account. Direct EOA transactions
+                  aren't supported — sending requires a{" "}
+                  <a
+                    href="https://docs.pimlico.io/permissionless/reference/bundler-actions/sendUserOperation"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    bundler + UserOperation
+                  </a>
+                  .
+                </div>
+              </div>
+            )}
 
             <button
               onClick={handleLogout}

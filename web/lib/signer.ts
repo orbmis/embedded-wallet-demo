@@ -189,6 +189,7 @@ export async function recover(params: {
   return result;
 }
 
+
 export async function disconnectIframe(): Promise<void> {
   if (_connection) {
     try {
