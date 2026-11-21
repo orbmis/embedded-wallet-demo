@@ -506,17 +506,10 @@ export default function WalletWidget() {
               <div className="border-t pt-3">
                 <p className="text-xs font-medium text-gray-500 mb-1">Send ETH</p>
                 <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                  This wallet is an ERC-4337 smart account. Direct EOA transactions
-                  aren't supported — sending requires a{" "}
-                  <a
-                    href="https://docs.pimlico.io/permissionless/reference/bundler-actions/sendUserOperation"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline"
-                  >
-                    bundler + UserOperation
-                  </a>
-                  .
+                  Transaction signing requires a raw secp256k1 signature. This
+                  OpenSigner build always applies an EIP-191 prefix (correct for
+                  message signing, incompatible with transactions). A future iframe
+                  build with raw signing support would unblock this.
                 </div>
               </div>
             )}
