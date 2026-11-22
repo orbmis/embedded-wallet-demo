@@ -4,6 +4,7 @@ import confetti from "canvas-confetti";
 import {
   walletProvider,
   announceEIP6963Provider,
+  PROVIDER_INFO,
   type EIP6963ProviderInfo,
 } from "@/lib/provider";
 import { getSepoliaBalance } from "@/lib/chain";
@@ -90,7 +91,8 @@ export default function DApp() {
   const [sendAmt,    setSendAmt]    = useState("");
   const [sendStep,   setSendStep]   = useState<SendStep>("idle");
   const [txResult,   setTxResult]   = useState<TxResult | null>(null);
-  const [copied,     setCopied]     = useState(false);
+  const [copied,           setCopied]          = useState(false);
+  const [showOtherWallets, setShowOtherWallets] = useState(false);
   const isSending = sendStep !== "idle" && sendStep !== "confirmed" && sendStep !== "pending" && sendStep !== "error";
 
   // Discover EIP-6963 wallets
@@ -197,7 +199,10 @@ export default function DApp() {
 
   // ── Discover ────────────────────────────────────────────────────────────────
   if (dappState !== "connected") {
-    const primary = wallets[0];
+    // Always show OpenSigner first; fall back to whatever announces first
+    const primary = wallets.find(w => w.info.rdns === PROVIDER_INFO.rdns) ?? wallets[0];
+    const others  = wallets.filter(w => w !== primary);
+
     return (
       <div className="flex flex-col items-center justify-center min-h-[55vh] gap-6 text-center">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-200">
@@ -215,43 +220,61 @@ export default function DApp() {
           </p>
         </div>
 
-        {primary && (
-          <button
-            onClick={() => connect(primary)}
-            disabled={dappState === "connecting"}
-            className="flex items-center gap-3 px-5 py-3 bg-white border-2 border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 rounded-2xl transition-all shadow-sm disabled:opacity-50"
-          >
-            <img src={primary.info.icon} alt="" className="w-8 h-8 rounded-xl" />
-            <div className="text-left">
-              <p className="font-semibold text-sm text-slate-900">{primary.info.name}</p>
-              <p className="text-xs text-slate-400">{primary.info.rdns}</p>
-            </div>
-            {dappState === "connecting" ? (
-              <svg className="ml-2 w-4 h-4 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            ) : (
-              <svg className="ml-2 w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            )}
-          </button>
-        )}
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          {/* Primary — OpenSigner */}
+          {primary && (
+            <button
+              onClick={() => connect(primary)}
+              disabled={dappState === "connecting"}
+              className="flex items-center gap-3 px-5 py-3 bg-white border-2 border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 rounded-2xl transition-all shadow-sm disabled:opacity-50"
+            >
+              <img src={primary.info.icon} alt="" className="w-8 h-8 rounded-xl" />
+              <div className="text-left flex-1">
+                <p className="font-semibold text-sm text-slate-900">{primary.info.name}</p>
+                <p className="text-xs text-slate-400">{primary.info.rdns}</p>
+              </div>
+              {dappState === "connecting" ? (
+                <svg className="w-4 h-4 animate-spin text-indigo-500 shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 text-indigo-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              )}
+            </button>
+          )}
 
-        {/* Additional wallets if multiple */}
-        {wallets.length > 1 && (
-          <div className="flex flex-col gap-2 w-full max-w-xs">
-            <p className="text-xs text-slate-400 text-center">Other wallets</p>
-            {wallets.slice(1).map(w => (
-              <button key={w.info.uuid} onClick={() => connect(w)}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm transition-all">
-                <img src={w.info.icon} alt="" className="w-5 h-5 rounded-md" />
-                <span className="text-slate-700">{w.info.name}</span>
+          {/* Other wallets — collapsible */}
+          {others.length > 0 && (
+            <div className="w-full">
+              <button
+                onClick={() => setShowOtherWallets(v => !v)}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                {showOtherWallets ? "Hide" : `${others.length} other wallet${others.length > 1 ? "s" : ""}`}
+                <svg
+                  className={`w-3 h-3 transition-transform ${showOtherWallets ? "rotate-180" : ""}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-            ))}
-          </div>
-        )}
+              {showOtherWallets && (
+                <div className="flex flex-col gap-1.5 mt-1">
+                  {others.map(w => (
+                    <button key={w.info.uuid} onClick={() => connect(w)}
+                      className="flex items-center gap-2.5 px-4 py-2.5 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-sm transition-all">
+                      <img src={w.info.icon} alt="" className="w-5 h-5 rounded-md shrink-0" />
+                      <span className="text-slate-700 text-left">{w.info.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -261,53 +284,54 @@ export default function DApp() {
     <div className="space-y-4">
       {/* Account card */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 pb-8" />
-        <div className="px-4 pb-4 -mt-6">
-          <div className="flex items-end justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-white shadow-md border border-slate-100 flex items-center justify-center">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-400 to-purple-500" />
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-slate-500">Smart Account</span>
-                  <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">Sepolia</span>
-                </div>
-                {saLoading ? (
-                  <div className="h-4 w-32 bg-slate-200 animate-pulse rounded mt-0.5" />
-                ) : saAddress ? (
-                  <p className="font-mono text-sm font-semibold text-slate-800">
-                    {saAddress.slice(0, 10)}…{saAddress.slice(-6)}
-                  </p>
-                ) : (
-                  <p className="text-xs text-red-500 max-w-[200px] leading-tight mt-0.5" title={saError ?? ""}>{saError ?? "Setup failed"}</p>
-                )}
-              </div>
+        {/* Gradient header — address left, balance right, all on same baseline */}
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <div className="w-6 h-6 rounded-lg bg-white/60" />
             </div>
-            <div className="text-right pb-0.5">
-              <div className="flex items-center gap-1.5 justify-end">
-                <p className="text-2xl font-bold text-slate-900 font-mono">
-                  {saAddress ? (balance || "0.000000") : "—"}
-                </p>
-                <span className="text-sm text-slate-400 font-normal">ETH</span>
-                {saAddress && (
-                  <button onClick={() => refreshBalance(saAddress)} disabled={balLoading}
-                    className={`text-slate-400 hover:text-indigo-600 transition-colors ${balLoading ? "animate-spin" : ""}`}>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </button>
-                )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-medium text-indigo-200">Smart Account</span>
+                <span className="text-xs bg-white/20 text-white px-1.5 py-0.5 rounded-full font-medium">Sepolia</span>
               </div>
-              {saAddress && (
-                <a href="https://www.alchemy.com/faucets/ethereum-sepolia" target="_blank" rel="noopener noreferrer"
-                  className="text-xs text-indigo-500 hover:text-indigo-700">
-                  Get test ETH ↗
-                </a>
+              {saLoading ? (
+                <div className="h-4 w-32 bg-white/20 animate-pulse rounded mt-1" />
+              ) : saAddress ? (
+                <p className="font-mono text-sm font-semibold text-white truncate">
+                  {saAddress.slice(0, 10)}…{saAddress.slice(-6)}
+                </p>
+              ) : (
+                <p className="text-xs text-red-200 mt-0.5 truncate" title={saError ?? ""}>{saError ?? "Setup failed"}</p>
               )}
             </div>
           </div>
-          <p className="text-xs text-slate-400 mt-2">
+          <div className="text-right shrink-0">
+            <div className="flex items-center gap-1 justify-end">
+              <span className="text-2xl font-bold text-white font-mono leading-none">
+                {saAddress ? (balance || "0.000000") : "—"}
+              </span>
+              <span className="text-xs text-indigo-200 self-end pb-0.5">ETH</span>
+              {saAddress && (
+                <button onClick={() => refreshBalance(saAddress)} disabled={balLoading}
+                  className={`text-indigo-200 hover:text-white transition-colors ml-0.5 ${balLoading ? "animate-spin" : ""}`}>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {saAddress && (
+              <a href="https://www.alchemy.com/faucets/ethereum-sepolia" target="_blank" rel="noopener noreferrer"
+                className="text-xs text-indigo-200 hover:text-white">
+                Get test ETH ↗
+              </a>
+            )}
+          </div>
+        </div>
+        {/* Footer — owner key */}
+        <div className="px-4 py-2.5 border-t border-slate-50">
+          <p className="text-xs text-slate-400">
             Owner: <span className="font-mono">{ownerAddr.slice(0, 10)}…{ownerAddr.slice(-4)}</span>
           </p>
         </div>
