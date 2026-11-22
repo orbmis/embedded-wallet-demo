@@ -1,6 +1,6 @@
 # Embedded Wallet Demo
 
-A local two-panel web app (`http://localhost:7060`) that shows an end-to-end non-custodial embedded wallet connected to a dApp via the EIP-6963 wallet-discovery standard, with real on-chain transactions submitted through ERC-4337 UserOperations.
+A local two-panel web app (`http://localhost:7060`) that shows an end-to-end embedded wallet connected to a dApp via the EIP-6963 wallet-discovery standard, with real on-chain transactions submitted through ERC-4337 UserOperations.
 
 ## What it demonstrates
 
@@ -10,9 +10,9 @@ A local two-panel web app (`http://localhost:7060`) that shows an end-to-end non
 | Create wallet — key split into device, hot and cold shares via OpenSigner | Wallet panel |
 | Recover wallet on a new device (incognito window) | Wallet panel |
 | Wallet announces itself via **EIP-6963** | Automatic on load |
-| dApp discovers wallet, user clicks **Connect** → approval popup | dApp ← Wallet panel |
-| dApp shows Smart Account address and Sepolia balance | dApp |
-| **Send ETH** → UserOp signed in wallet → Pimlico broadcasts → Etherscan link | dApp ← Wallet panel |
+| Embedded wallet connection synchronizes automatically when ready; other discovered wallets can be selected manually | dApp ← Wallet panel |
+| dApp shows Nexus Account address and Sepolia balance | dApp |
+| **Send ETH** → review amount, sender, recipient and network → approve → Pimlico broadcasts → Etherscan link | dApp ← Wallet panel |
 | **Receive** tab shows full address for funding | dApp |
 
 ## Architecture
@@ -28,7 +28,7 @@ Browser (localhost:7060, Next.js)
 │            ├── Pimlico verifying paymaster (sponsors gas)
 │            └── Pimlico bundler → Sepolia on-chain
 │
-└── Wallet panel (right, floating)
+└── Wallet panel (desktop sidebar / mobile sheet opened with Wallet button)
     ├── better-auth client → auth_service :7052 ──OAuth──▶ Google
     │        GET /api/auth/token (cookie) → JWT
     ├── hidden <iframe src=:7050> ◀─Penpal─▶ create / sign / recover
@@ -112,9 +112,20 @@ The Smart Account is a counterfactual **Biconomy Nexus 1.3.3** account, created 
 
 ### Migration from SimpleAccount
 
-This creates a **new smart account address** for existing users. It does not upgrade or move assets from their old SimpleAccount. The MPC owner key and its recovery remain unchanged. Before using the new address, record the old account address and arrange any asset transfers separately through the old integration. Never pass an old SimpleAccount address as an existing Nexus account.
+This creates a **new smart account address** for existing users. It does not upgrade or move assets from their old SimpleAccount. The OpenSigner owner key and its share-recovery flow remain unchanged. Before using the new address, record the old account address and arrange any asset transfers separately through the old integration. Never pass an old SimpleAccount address as an existing Nexus account.
 
-The existing Sepolia `NEXT_PUBLIC_PIMLICO_URL` can be retained if its bundler and paymaster support EntryPoint v0.7. No new MPC key or backend account is required. Modules such as session keys and recovery validators are not installed by this migration. The selected suite initializes without a module registry; review module installation controls before adding extensions in production.
+When switching to this branch, stop the existing dev server, install the updated dependencies with Node.js 22.13 or newer, and restart:
+
+```bash
+nvm use 22
+cd web
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Refresh the browser after restarting. The account card and Receive tab display the new Nexus address.
+
+The existing Sepolia `NEXT_PUBLIC_PIMLICO_URL` can be retained if its bundler and paymaster support EntryPoint v0.7. No new signing key or backend account is required. Modules such as session keys and recovery validators are not installed by this migration. The selected suite initializes without a module registry; review module installation controls before adding extensions in production.
 
 ---
 
@@ -264,6 +275,12 @@ NEXT_PUBLIC_DEV_EMAIL_LOGIN=true make dev
 
 ---
 
+## Wallet connection and mobile behavior
+
+The dApp reads the embedded provider's current account and listens for account changes. When the wallet becomes ready, the dApp initializes the Nexus account automatically. Logout clears the connection. Background session refreshes for the same user preserve the connection and transaction UI.
+
+On mobile, the **Wallet** button opens the wallet sheet. Transaction approvals appear in a separate modal and do not automatically open the sheet. The modal displays the amount, full sender and recipient addresses, network, gas sponsorship and an expandable signing hash. Approval shows signing progress, then closes after signing; the dApp continues showing submission and confirmation progress.
+
 ## How the transaction flow works
 
 ```
@@ -272,7 +289,7 @@ User clicks Send
   → permissionless builds UserOp with Pimlico paymaster calldata
   → SmartAccountClient calls personal_sign(userOpHash, ownerAddress)
   → walletProvider queues pending request
-  → Wallet panel shows "Authorize transaction" popup
+  → A separate "Authorize Transaction" modal shows the transfer details
   → User approves
   → signRaw() sends raw 32-byte userOpHash to OpenSigner iframe
   → Iframe applies EIP-191 prefix → Nexus MEE K1 validator-compatible signature
@@ -306,11 +323,11 @@ node --env-file=.env.local --import tsx scripts/verify-nexus-transfer.ts
 Unit tests additionally exercise the real Nexus SDK's EIP-191 UserOperation signing through the wallet provider, approval metadata, rejected signatures, execution failure, pending confirmations and overlapping sends.
 
 ```bash
-make test   # vitest unit tests (chain.ts verify helpers)
-make e2e    # Playwright E2E: register → create → sign → recover → logout
+make test   # Vitest: signature helpers, provider approvals and Nexus integration
+make e2e    # Legacy Playwright wallet flow; selectors need updating for the current UI
 ```
 
-E2E tests use email/password login and do not require Google credentials or Pimlico.
+The legacy Playwright suite uses email/password login, but its selectors target an older UI and it has not been validated for this migration. Use the unit tests and the Nexus smoke scripts above for the checks added on this branch.
 
 ---
 
@@ -368,5 +385,5 @@ See **[PRODUCTION.md](./PRODUCTION.md)** for a full breakdown of what needs to c
 
 - **Raw Google ID tokens** — `hot_storage` supports `X-Auth-Provider: google` with `GOOGLE_JWT_AUDIENCE`, bypassing better-auth. Shield would need a separate Google JWK provider. More complex and untested in this demo.
 - **Password / passkey recovery** — the OpenSigner iframe supports `recoveryMethod: "password"` and WebAuthn PRF passkey recovery. See `setRecoveryMethod` in the sample HTML.
-- **EIP-712 typed data** — `personal_sign` on the encoded struct hash would work the same way as message signing.
+- **EIP-712 typed data** — not supported by the current OpenSigner adapter. Adding it requires compatible digest signing and verification; signing an EIP-712 hash with `personal_sign` adds an EIP-191 prefix and is not equivalent to an EIP-712 signature.
 - **Other bundlers** — any ERC-4337 bundler that speaks the standard JSON-RPC interface works. Replace the Pimlico URL with Alchemy, Stackup, or a self-hosted Alto instance.
