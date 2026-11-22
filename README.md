@@ -68,7 +68,7 @@ Same Google account
   → same user in Shield          →  same cold share
   → same private key on reconstruction
   → same EOA address
-  → same SimpleAccount address (factory + salt are hardcoded constants)
+  → same Nexus address (deployment suite, initialization and index are pinned)
 ```
 
 | Scenario | Same address? | Notes |
@@ -77,7 +77,7 @@ Same Google account
 | Same Google account, new computer or browser | ✓ after one recovery click | Hot + cold shares reconstruct the key; device share written to new IndexedDB |
 | Same Google account, different dApp (same backend) | ✓ | dApp is irrelevant to wallet identity |
 | Different `auth_service` instance | ✗ | Different user ID → new account created |
-| Same backend, different SimpleAccount factory or salt | ✗ | EOA is the same; Smart Account address differs |
+| Same backend, different Nexus factory, validator or index | ✗ | EOA is the same; Smart Account address differs |
 | Browser storage cleared before recovery | ✗ device share lost | Key is still recoverable from hot + cold — click Recover |
 
 The recovery step on a new device is intentional: it is a security checkpoint. A new browser must prove it can authenticate (obtain a valid JWT) before the key is reconstructed there.
@@ -100,9 +100,21 @@ The private key is reconstructed inside the iframe in memory and never exposed t
 
 ### Why ERC-4337 for transactions
 
-The OpenSigner iframe signs with **EIP-191** (`personal_sign`), which is incompatible with raw Ethereum transaction signatures. ERC-4337 SimpleAccount validates signatures using `userOpHash.toEthSignedMessageHash().recover(sig)` — that is exactly EIP-191 on the 32-byte hash. So the same signing key works for both message signing and on-chain transactions once routed through a UserOperation.
+The OpenSigner iframe signs with **EIP-191** (`personal_sign`), which is incompatible with raw Ethereum transaction signatures. Nexus 1.3.3 with its MEE K1 ECDSA validator accepts EIP-191 signatures of the EntryPoint v0.7 UserOperation hash. So the same signing key works for both message signing and on-chain transactions once routed through a UserOperation.
 
-The Smart Account address is a counterfactual **SimpleAccount** (OpenZeppelin factory) derived deterministically from the wallet's signing key. It is deployed on the first transaction.
+The Smart Account is a counterfactual **Biconomy Nexus 1.3.3** account, created through `@biconomy/abstractjs` 2.0.3 using the explicitly pinned MEE 2.2.3 deployment suite, with `permissionless` 0.5.x handling Pimlico bundling and EntryPoint v0.7. It is deployed on the first transaction. Address derivation uses the owner plus fixed parameters in `web/lib/erc4337.ts`:
+
+- Factory: `0x0000b1C08f1418dA76B5E99c1Bf5718486cf8c53`
+- K1 validator: `0x0000B1C0790E5a28293276C320d2B95D651dBaD6`
+- Implementation: `0x0000B1c01cB3b5770D8806f0D214d50131a08a5B`
+- Index: `0`; default owner validator; no optional executor, hook or fallback modules
+- EntryPoint: `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
+
+### Migration from SimpleAccount
+
+This creates a **new smart account address** for existing users. It does not upgrade or move assets from their old SimpleAccount. The MPC owner key and its recovery remain unchanged. Before using the new address, record the old account address and arrange any asset transfers separately through the old integration. Never pass an old SimpleAccount address as an existing Nexus account.
+
+The existing Sepolia `NEXT_PUBLIC_PIMLICO_URL` can be retained if its bundler and paymaster support EntryPoint v0.7. No new MPC key or backend account is required. Modules such as session keys and recovery validators are not installed by this migration. The selected suite initializes without a module registry; review module installation controls before adding extensions in production.
 
 ---
 
@@ -263,19 +275,35 @@ User clicks Send
   → Wallet panel shows "Authorize transaction" popup
   → User approves
   → signRaw() sends raw 32-byte userOpHash to OpenSigner iframe
-  → Iframe applies EIP-191 prefix → SimpleAccount-compatible signature
+  → Iframe applies EIP-191 prefix → Nexus MEE K1 validator-compatible signature
   → UserOp submitted to Pimlico bundler
-  → Pimlico paymaster sponsors gas (no ETH needed in SA)
+  → Pimlico paymaster sponsors gas (the transfer amount still requires ETH in the account)
   → Bundler submits on-chain
-  → App polls eth_getUserOperationReceipt until confirmed
+  → App waits for the submitted UserOperation hash and checks execution success
   → Etherscan link shown (or JiffyScan link if still pending)
 ```
 
-> The Smart Account is **counterfactual** (not yet deployed) until the first transaction. The first UserOp includes `initCode` to deploy it atomically — this is normal ERC-4337 behaviour.
+> The Smart Account is **counterfactual** (not yet deployed) until the first transaction. The first v0.7 UserOp includes `factory` and `factoryData` to deploy it atomically — this is normal ERC-4337 behaviour.
 
 ---
 
 ## Running tests
+
+Use Node.js 22.13 or newer for the current tooling. Run `pnpm test`, `pnpm exec tsc --noEmit` and `pnpm build` from `web/`.
+
+A read-only live Sepolia check is available from `web/`:
+
+```bash
+node --env-file=.env.local --import tsx scripts/verify-nexus.ts
+```
+
+This checks deployment bytecode, bundler EntryPoint v0.7 support, and deterministic Nexus address derivation. It never signs or submits a transaction. An optional live transaction check is also available. It creates a fresh temporary test key and submits a **zero-ETH transfer on Sepolia**, with gas paid by the configured Pimlico sponsorship. It does not use the logged-in user's wallet:
+
+```bash
+node --env-file=.env.local --import tsx scripts/verify-nexus-transfer.ts
+```
+
+Unit tests additionally exercise the real Nexus SDK's EIP-191 UserOperation signing through the wallet provider, approval metadata, rejected signatures, execution failure, pending confirmations and overlapping sends.
 
 ```bash
 make test   # vitest unit tests (chain.ts verify helpers)

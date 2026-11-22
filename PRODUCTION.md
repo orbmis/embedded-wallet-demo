@@ -110,9 +110,9 @@ These fields are passed directly to the OpenSigner iframe. Their effect on key d
 | Item | Detail |
 |---|---|
 | **Paid bundler** | The Pimlico free tier has rate limits. Production traffic needs a paid plan or a self-hosted bundler (e.g. [Alto](https://github.com/pimlicoHQ/alto)) |
-| **Upgrade to EntryPoint v0.7** | The demo uses EntryPoint v0.6 (`0x5FF137D4...`). v0.7 (`0x0000000071727De22E5E9d8BAf0edAc6f37da032`) improves gas efficiency and is the current standard for new deployments |
+| **Nexus / EntryPoint v0.7** | The demo uses Nexus 1.3.3 (MEE suite 2.2.3) with the MEE K1 validator and EntryPoint v0.7 (`0x0000000071727De22E5E9d8BAf0edAc6f37da032`). Pin deployment parameters and assess module installation controls before enabling extensions. Existing SimpleAccount assets require a separate migration. |
 | **Paymaster policy** | The current verifying paymaster sponsors all transactions unconditionally. Production needs policy: per-user gas limits, allowlisted target contracts, expiry, abuse detection |
-| **Multi-chain** | The SimpleAccountFactory address and EntryPoint are the same on all EVM-compatible chains, so expansion is straightforward — each chain needs its own bundler RPC endpoint in `NEXT_PUBLIC_PIMLICO_URL` |
+| **Multi-chain** | Verify Nexus factory, validator and EntryPoint deployments on each target chain; configure chain-specific public RPC, bundler/paymaster and UI state. Do not assume every EVM chain has matching deployments |
 | **Raw signing** | The OpenSigner iframe signs with EIP-191 and does not expose a raw `secp256k1` signing mode. EOA transactions (non-ERC-4337 chains, pre-ERC-4337 flows) are not possible without an iframe build that supports raw signing |
 
 ---

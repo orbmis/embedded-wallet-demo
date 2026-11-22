@@ -1,9 +1,11 @@
 import { createPublicClient, http, recoverMessageAddress, getAddress, type Hex } from "viem";
 import { sepolia } from "viem/chains";
 
+export const publicTransport = http();
+
 export const publicClient = createPublicClient({
   chain: sepolia,
-  transport: http(),
+  transport: publicTransport,
 });
 
 export async function getSepoliaBalance(address: string): Promise<string> {

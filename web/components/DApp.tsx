@@ -332,7 +332,7 @@ export default function DApp() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs font-medium text-indigo-200">Smart Account</span>
+                <span className="text-xs font-medium text-indigo-200">Nexus Account</span>
                 <span className="text-xs bg-white/20 text-white px-1.5 py-0.5 rounded-full font-medium">Sepolia</span>
               </div>
               {saLoading ? (
@@ -500,7 +500,7 @@ export default function DApp() {
                 </svg>
               </div>
               <div>
-                <p className="text-xs font-medium text-slate-500 mb-2">Your Smart Account address</p>
+                <p className="text-xs font-medium text-slate-500 mb-2">Your Nexus Account address</p>
                 <div className="p-3 bg-slate-50 rounded-xl font-mono text-xs break-all text-slate-700 border border-slate-100">
                   {saAddress}
                 </div>

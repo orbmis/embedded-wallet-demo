@@ -29,10 +29,7 @@ function ApprovalModal({
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const isUserOpSign =
-    pending.method === "personal_sign" &&
-    ((pending.params as string[])[0]?.length === 66 ||
-     (pending.params as string[])[1]?.length === 66);
+  const isUserOpSign = pending.method === "personal_sign" && !!pending.transaction;
 
   const title =
     pending.method === "eth_requestAccounts" ? "Connection Request"

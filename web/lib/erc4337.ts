@@ -1,71 +1,24 @@
 "use client";
-import { createWalletClient, custom, http, type Address, type Hash, type Hex } from "viem";
+import { createWalletClient, custom, http, type Address, type Hex } from "viem";
+import { toAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import {
-  ENTRYPOINT_ADDRESS_V06,
-  createSmartAccountClient,
-  walletClientToSmartAccountSigner,
-} from "permissionless";
-import { signerToSimpleSmartAccount } from "permissionless/accounts";
-import {
-  createPimlicoBundlerClient,
-  createPimlicoPaymasterClient,
-} from "permissionless/clients/pimlico";
+import { entryPoint07Address } from "viem/account-abstraction";
+import { createSmartAccountClient } from "permissionless";
+import { getMEEVersion, MEEVersion, toNexusAccount } from "@biconomy/abstractjs";
+import { createPimlicoClient } from "permissionless/clients/pimlico";
 import { walletProvider, type TransactionDetails } from "./provider";
-import { publicClient } from "./chain";
+import { publicTransport } from "./chain";
 
-const FACTORY = "0x9406Cc6185a346906296840746125a0E44976454" as Address;
+// Pin the deployed Nexus 1.3.3 suite rather than the SDK's evolving default.
+export const NEXUS_CONFIG = getMEEVersion(MEEVersion.V2_2_3);
+export const NEXUS_INDEX = 0n;
+export const NEXUS_ENTRY_POINT = { address: entryPoint07Address, version: "0.7" } as const;
 
 const BUNDLER_URL = process.env["NEXT_PUBLIC_PIMLICO_URL"] ?? "";
 
-function assertBundlerUrl(): string {
-  if (!BUNDLER_URL) {
-    throw new Error(
-      "No bundler URL configured. Add NEXT_PUBLIC_PIMLICO_URL to web/.env.local — " +
-        "free key at https://dashboard.pimlico.io",
-    );
-  }
-  return BUNDLER_URL;
-}
-
-// When sendTransaction times out, the userOpHash is embedded in the error.
-// Pull it out so we can poll separately.
-function extractUserOpHash(errorMessage: string): Hex | null {
-  const match = errorMessage.match(/0x[0-9a-fA-F]{64}/);
-  return match ? (match[0] as Hex) : null;
-}
-
-// Poll the bundler directly for the receipt — bypasses the client-side timeout.
-async function pollReceipt(
-  bundlerUrl: string,
-  userOpHash: Hex,
-  maxMs = 90_000,
-): Promise<Hex | null> {
-  const deadline = Date.now() + maxMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(bundlerUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_getUserOperationReceipt",
-          params: [userOpHash],
-        }),
-      });
-      const json = (await res.json()) as { result?: { receipt?: { transactionHash?: string } } };
-      const txHash = json.result?.receipt?.transactionHash;
-      if (txHash) return txHash as Hex;
-    } catch { /* ignore transient fetch errors */ }
-    await new Promise(r => setTimeout(r, 3_000));
-  }
-  return null;
-}
-
 export interface SendResult {
   txHash: Hex;
-  userOpHash?: Hex; // present when we got the hash but had to poll manually
+  userOpHash: Hex;
 }
 
 export interface SmartAccountSetup {
@@ -73,13 +26,13 @@ export interface SmartAccountSetup {
   send(to: Address, valueWei: bigint): Promise<SendResult>;
 }
 
-export async function setupSmartAccount(
-  ownerAddress: Address,
-): Promise<SmartAccountSetup> {
-  const bundlerUrl = assertBundlerUrl();
+export async function setupSmartAccount(ownerAddress: Address): Promise<SmartAccountSetup> {
+  if (!BUNDLER_URL) {
+    throw new Error("No bundler URL configured. Add NEXT_PUBLIC_PIMLICO_URL to web/.env.local");
+  }
 
   let transaction: TransactionDetails | undefined;
-  const walletClient = createWalletClient({
+  const owner = createWalletClient({
     account: ownerAddress,
     chain: sepolia,
     transport: custom({
@@ -91,67 +44,51 @@ export async function setupSmartAccount(
     }),
   });
 
-  const signer = walletClientToSmartAccountSigner(walletClient);
-
-  const simpleAccount = await signerToSimpleSmartAccount(publicClient, {
-    signer,
-    factoryAddress: FACTORY,
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
+  const account = await toNexusAccount({
+    // A local adapter keeps the SDK on our MPC transport, never window.ethereum.
+    signer: toAccount({
+      address: ownerAddress,
+      signMessage: args => owner.signMessage(args),
+      signTypedData: async () => { throw new Error("Typed-data signing is not supported by OpenSigner"); },
+      signTransaction: async () => { throw new Error("Raw transaction signing is not supported by OpenSigner"); },
+    }),
+    index: NEXUS_INDEX,
+    chainConfiguration: { chain: sepolia, transport: publicTransport, version: NEXUS_CONFIG },
   });
 
-  const bundlerClient = createPimlicoBundlerClient({
-    transport: http(bundlerUrl),
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
-  });
-
-  const paymasterClient = createPimlicoPaymasterClient({
-    transport: http(bundlerUrl),
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
-  });
-
-  const smartAccountClient = createSmartAccountClient({
-    account: simpleAccount,
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
+  const pimlico = createPimlicoClient({
     chain: sepolia,
-    bundlerTransport: http(bundlerUrl),
-    middleware: {
-      gasPrice: async () => (await bundlerClient.getUserOperationGasPrice()).fast,
-      sponsorUserOperation: paymasterClient.sponsorUserOperation,
+    transport: http(BUNDLER_URL),
+    entryPoint: NEXUS_ENTRY_POINT,
+  });
+  const client = createSmartAccountClient({
+    account,
+    chain: sepolia,
+    bundlerTransport: http(BUNDLER_URL),
+    paymaster: pimlico,
+    userOperation: {
+      estimateFeesPerGas: async () => (await pimlico.getUserOperationGasPrice()).fast,
     },
   });
 
   return {
-    saAddress: simpleAccount.address,
-
-    async send(to: Address, valueWei: bigint): Promise<SendResult> {
+    saAddress: account.address,
+    async send(to, valueWei) {
       if (transaction) throw new Error("A transaction is already in progress");
-      transaction = { from: simpleAccount.address, to, valueWei: valueWei.toString(), chainId: sepolia.id };
+      transaction = { from: account.address, to, valueWei: valueWei.toString(), chainId: sepolia.id };
       try {
-        const txHash = await smartAccountClient.sendTransaction({
-          to,
-          value: valueWei,
-          data: "0x",
-        });
-        return { txHash: txHash as Hex };
-      } catch (err) {
-        const msg = (err as Error).message ?? "";
-        const isTimeout =
-          msg.toLowerCase().includes("timed out") ||
-          msg.toLowerCase().includes("timeout");
-
-        if (isTimeout) {
-          const userOpHash = extractUserOpHash(msg);
-          if (userOpHash) {
-            // UserOp reached the bundler — poll the bundler directly for up to 90s
-            const txHash = await pollReceipt(bundlerUrl, userOpHash);
-            if (txHash) return { txHash, userOpHash };
-            // Still unconfirmed — surface the userOpHash so the UI can link to JiffyScan
-            const e = new Error(`UserOp submitted but not yet confirmed.`);
-            (e as unknown as Record<string, unknown>)["userOpHash"] = userOpHash;
-            throw e;
-          }
+        const userOpHash = await client.sendUserOperation({ calls: [{ to, value: valueWei, data: "0x" }] });
+        // Retain the actual submitted hash; never extract a hash from error text.
+        let receipt;
+        try {
+          receipt = await client.waitForUserOperationReceipt({ hash: userOpHash, timeout: 180_000 });
+        } catch {
+          throw Object.assign(new Error("UserOperation submitted; confirmation is not yet available."), { userOpHash });
         }
-        throw err;
+        if (!receipt.success) {
+          throw new Error(`Transaction execution failed: ${receipt.reason || "UserOperation reverted"}`);
+        }
+        return { txHash: receipt.receipt.transactionHash, userOpHash };
       } finally {
         transaction = undefined;
       }

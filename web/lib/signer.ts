@@ -192,7 +192,7 @@ export async function recover(params: {
 
 
 // Signs raw bytes directly — the iframe applies EIP-191 to the 32-byte value.
-// Use this for ERC-4337 userOpHashes where SimpleAccount expects:
+// Use this for ERC-4337 userOpHashes where the Nexus K1 validator expects:
 //   keccak256("\x19Ethereum Signed Message:\n32" + rawHash)
 export async function signRaw(params: {
   jwt: string;
