@@ -28,6 +28,7 @@ export default function DApp() {
   const [ownerAddress, setOwnerAddress] = useState("");
   const [saSetup, setSaSetup] = useState<SmartAccountSetup | null>(null);
   const [saLoading, setSaLoading] = useState(false);
+  const [saError, setSaError] = useState<string | null>(null);
   const [balance, setBalance] = useState("");
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [tab, setTab] = useState<"send" | "receive">("send");
@@ -80,12 +81,15 @@ export default function DApp() {
 
       // Compute ERC-4337 SimpleAccount address from owner key
       setSaLoading(true);
+      setSaError(null);
       try {
         const setup = await setupSmartAccount(getAddress(owner));
         setSaSetup(setup);
         void refreshBalance(setup.saAddress);
-      } catch {
-        // SA setup failed — still show connected, just no send
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        setSaError(msg);
+        console.error("SA setup:", msg);
       } finally {
         setSaLoading(false);
       }
@@ -193,9 +197,9 @@ export default function DApp() {
                 <p className="text-sm font-mono font-medium">
                   {saAddress.slice(0, 10)}…{saAddress.slice(-6)}
                 </p>
-              ) : (
-                <p className="text-xs text-red-400">SA setup failed</p>
-              )}
+              ) : saError ? (
+                <p className="text-xs text-red-500 max-w-[180px] truncate" title={saError}>{saError}</p>
+              ) : null}
             </div>
           </div>
           <div className="text-right">
