@@ -106,6 +106,43 @@ The Smart Account address is a counterfactual **SimpleAccount** (OpenZeppelin fa
 
 ---
 
+## Authentication: auth_service and better-auth
+
+### better-auth
+
+[better-auth](https://better-auth.com) is an open-source TypeScript authentication library — a self-hosted alternative to Auth0 or Clerk. It handles:
+
+- User registration and login (email/password and social providers like Google)
+- Session management via HTTP-only cookies
+- JWT issuance through its `jwt` plugin
+- Database persistence (Postgres)
+- A JWKS endpoint (`/.well-known/jwks.json`) so other services can verify its tokens independently
+
+### auth_service
+
+`auth_service` is a small Express server (`vendor/opensigner/auth_service/src/server.ts`) that wraps better-auth and exposes it as a standalone HTTP service on port 7052. OpenSigner ships it as a separate process so any frontend or backend can authenticate against it independently.
+
+The only modification in this repo is the Google social provider — a 7-line patch in `patches/auth-google.patch`. Everything else (JWT signing, JWKS, rate limiting, session cookies) is stock better-auth.
+
+### Why every other service depends on it
+
+```
+auth_service issues JWTs (signed with JWT_SECRET)
+       │
+       ├── hot_storage  — verifies JWTs before returning any share
+       │                  (fetches JWKS from http://authservice:3000/.well-known/jwks.json)
+       │
+       ├── Shield       — verifies JWTs via the "custom" provider configured at bootstrap
+       │                  (same JWKS URL, internal docker hostname)
+       │
+       └── iframe       — receives JWT in every create / sign / recover call
+                          and passes it to hot_storage and Shield to identify the user
+```
+
+The JWT is the thread that connects everything. It carries the user ID, and that user ID is what links a Google identity to a specific set of shares in hot_storage and Shield. A valid JWT from *this* auth_service instance is required before either storage service will hand over a share — which is why pointing at a different backend produces a different wallet.
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Notes |
