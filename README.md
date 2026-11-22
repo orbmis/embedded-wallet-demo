@@ -38,12 +38,40 @@ Browser (localhost:7060, Next.js)
     └── EIP-1193 provider singleton → announces via EIP-6963
 ```
 
-### Key shares
-- **Device share** — iframe's IndexedDB (browser)
-- **Hot share** — `hot_storage`, encrypted with `SHARE_ENCRYPTION_KEY`
-- **Cold share** — Shield, encrypted with the project `encryption_part`
+### Key shares — where they are stored
 
-The private key is reconstructed inside the iframe in memory and never exposed.
+The private key is split into three shares using **Shamir Secret Sharing** (threshold 2-of-3: any two shares reconstruct the key). It is **not** MPC/TSS — the full key is briefly assembled inside the iframe's memory during signing and immediately discarded.
+
+| Share | Storage location | Encrypted with | Access control |
+|---|---|---|---|
+| **Device share** | Browser IndexedDB at the iframe's origin (`localhost:7050`) | — (browser sandbox) | Only code running at that origin can read it |
+| **Hot share** | `hot_storage` Postgres database | `SHARE_ENCRYPTION_KEY` (server env var) | Valid JWT from `auth_service` required |
+| **Cold share** | Shield (`cold_storage`) Postgres database | Project `encryption_part` | Valid JWT + correct Shield API key required |
+
+#### Device share detail
+Scoped to the iframe's origin, not the app's origin. This means:
+- Survives page refreshes and browser restarts
+- **Lost** in a fresh browser profile, incognito window, or new device — triggers the recovery flow
+- The parent page (`localhost:7060`) cannot read it; only the iframe's own JavaScript can
+
+#### Recovery
+When the device share is missing, the iframe fetches the hot and cold shares (2-of-3 is sufficient), reconstructs the key, and re-stores the device share in the new browser's IndexedDB.
+
+#### Security implication in this demo
+
+```
+This operator controls:
+  hot_storage  →  hot share   ✓
+  Shield       →  cold share  ✓
+                  ──────────────
+                  can reconstruct any user's key
+```
+
+Both services run under the same operator in this local setup, making it **custodial in practice**. In a production deployment you would break this by:
+- Having Shield operated by an independent third party, or
+- Using password or passkey recovery so the user holds the cold share's encryption key (not the operator)
+
+The private key is reconstructed inside the iframe in memory and never exposed to the host page.
 
 ### Why ERC-4337 for transactions
 
