@@ -274,14 +274,14 @@ export default function WalletWidget() {
   if (isPending) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 w-96 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
+    <div className="fixed bottom-4 right-4 w-96 bg-white rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[calc(100vh-2rem)]">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3">
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 rounded-t-2xl shrink-0">
         <h2 className="text-white font-semibold text-sm">Embedded Wallet</h2>
         <p className="text-blue-200 text-xs">Powered by OpenSigner</p>
       </div>
 
-      <div className="p-4">
+      <div className="p-4 overflow-y-auto">
         {/* Error banner */}
         {error && (
           <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs break-all">
