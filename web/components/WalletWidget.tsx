@@ -166,6 +166,7 @@ export default function WalletWidget() {
   const [pending,          setPending]         = useState<PendingRequest | null>(null);
   const [approving,        setApproving]       = useState(false);
   const [mounted,          setMounted]         = useState(false);
+  const [dappConnected,    setDappConnected]   = useState(false);
 
   const [devEmail,    setDevEmail]    = useState("");
   const [devPassword, setDevPassword] = useState("");
@@ -181,6 +182,13 @@ export default function WalletWidget() {
   useEffect(() => {
     walletProvider.onPendingRequest = req => setPending(req);
     return () => { walletProvider.onPendingRequest = null; };
+  }, []);
+
+  // Track whether the dApp has connected (eth_requestAccounts approved)
+  useEffect(() => {
+    const handler = (accs: unknown) => setDappConnected(Array.isArray(accs) && accs.length > 0);
+    walletProvider.on("accountsChanged", handler as (...args: unknown[]) => void);
+    return () => { walletProvider.removeListener("accountsChanged", handler as (...args: unknown[]) => void); };
   }, []);
 
   useEffect(() => {
@@ -361,8 +369,10 @@ export default function WalletWidget() {
               <div>
                 <p className="text-white font-semibold text-sm leading-tight">OpenSigner</p>
                 <p className="text-indigo-200 text-xs leading-tight">
-                  {state === "ready"
+                  {state === "ready" && dappConnected
                     ? `${address.slice(0, 8)}…${address.slice(-4)}`
+                    : state === "ready"
+                    ? "Wallet ready"
                     : "Not connected"}
                 </p>
               </div>
@@ -467,11 +477,20 @@ export default function WalletWidget() {
 
           {state === "ready" && (
             <div className="space-y-3">
-              <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-100 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot shrink-0" />
-                <p className="text-xs text-emerald-700 font-medium">Ready to sign</p>
-              </div>
-              <p className="text-xs text-slate-500 text-center">Connect from the dApp to get started</p>
+              {dappConnected ? (
+                <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-100 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot shrink-0" />
+                    <p className="text-xs text-emerald-700 font-medium">Connected to dApp</p>
+                  </div>
+                  <p className="font-mono text-xs text-slate-500 truncate">{address}</p>
+                </div>
+              ) : (
+                <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1">
+                  <p className="text-xs font-medium text-slate-700">Wallet ready</p>
+                  <p className="text-xs text-slate-400">Click <strong>Connect</strong> in the dApp to link your wallet.</p>
+                </div>
+              )}
               <button onClick={handleLogout}
                 className="w-full text-xs text-slate-400 hover:text-slate-600 py-1.5 transition-colors">
                 Log out
