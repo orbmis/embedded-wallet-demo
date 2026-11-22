@@ -81,6 +81,7 @@ export default function DApp() {
   const [wallets,    setWallets]    = useState<DiscoveredWallet[]>([]);
   const [dappState,  setDappState]  = useState<DAppState>("discover");
   const [ownerAddr,  setOwnerAddr]  = useState("");
+  const [activeProvider, setActiveProvider] = useState(walletProvider);
   const [saSetup,    setSaSetup]    = useState<SmartAccountSetup | null>(null);
   const [saLoading,  setSaLoading]  = useState(false);
   const [saError,    setSaError]    = useState<string | null>(null);
@@ -119,30 +120,69 @@ export default function DApp() {
     setBalLoading(false);
   }, []);
 
+  // Subscribe before reading accounts so readiness events cannot be missed.
+  useEffect(() => {
+    let disposed = false;
+    let accountChanged = false;
+    const syncAccounts = (accounts: unknown) => {
+      if (disposed) return;
+      const owner = Array.isArray(accounts) ? accounts[0] ?? "" : "";
+      setOwnerAddr(owner);
+      setDappState(owner ? "connected" : "discover");
+      setSaSetup(null);
+      setBalance("");
+      setTxResult(null);
+      setSendStep("idle");
+    };
+    const onAccountsChanged = (accounts: unknown) => {
+      accountChanged = true;
+      syncAccounts(accounts);
+    };
+    activeProvider.on("accountsChanged", onAccountsChanged);
+    void activeProvider.request({ method: "eth_accounts" }).then(accounts => {
+      if (!accountChanged) syncAccounts(accounts);
+    }).catch(() => {});
+    return () => {
+      disposed = true;
+      activeProvider.removeListener("accountsChanged", onAccountsChanged);
+    };
+  }, [activeProvider]);
+
+  // Account setup also runs for restored sessions and account changes.
+  useEffect(() => {
+    let disposed = false;
+    setSaSetup(null);
+    setSaError(null);
+    setSaLoading(!!ownerAddr);
+    if (!ownerAddr) return;
+    void (async () => {
+      try {
+        const setup = await setupSmartAccount(getAddress(ownerAddr));
+        if (disposed) return;
+        setSaSetup(setup);
+        setBalLoading(true);
+        const bal = await getSepoliaBalance(setup.saAddress).catch(() => "0.000000");
+        if (!disposed) {
+          setBalance(bal);
+          setBalLoading(false);
+        }
+      } catch (err) {
+        if (!disposed) setSaError((err as Error).message);
+      } finally {
+        if (!disposed) setSaLoading(false);
+      }
+    })();
+    return () => { disposed = true; };
+  }, [ownerAddr]);
+
   async function connect(wallet: DiscoveredWallet) {
     setDappState("connecting");
     try {
       const accounts = (await wallet.provider.request({ method: "eth_requestAccounts" })) as string[];
       const owner = accounts[0] ?? "";
+      setActiveProvider(wallet.provider);
       setOwnerAddr(owner);
-      setDappState("connected");
-      setSaLoading(true);
-      setSaError(null);
-      try {
-        const setup = await setupSmartAccount(getAddress(owner));
-        setSaSetup(setup);
-        void refreshBalance(setup.saAddress);
-      } catch (err) {
-        setSaError((err as Error).message);
-      } finally {
-        setSaLoading(false);
-      }
-      wallet.provider.on("accountsChanged", (accs: unknown) => {
-        const a = (accs as string[])[0] ?? "";
-        if (!a) { disconnect(); return; }
-        setOwnerAddr(a);
-        setSaSetup(null);
-      });
+      setDappState(owner ? "connected" : "discover");
     } catch {
       setDappState("discover");
     }

@@ -180,14 +180,16 @@ export default function WalletWidget() {
   }
 
   useEffect(() => {
-    walletProvider.onPendingRequest = req => setPending(req);
-    return () => { walletProvider.onPendingRequest = null; };
+    const unsubscribe = walletProvider.addPendingListener(setPending);
+    setPending(walletProvider.pendingRequest);
+    return unsubscribe;
   }, []);
 
-  // Track whether the dApp has connected (eth_requestAccounts approved)
+  // Read the same provider connection state as the dApp.
   useEffect(() => {
     const handler = (accs: unknown) => setDappConnected(Array.isArray(accs) && accs.length > 0);
     walletProvider.on("accountsChanged", handler as (...args: unknown[]) => void);
+    handler(walletProvider.accounts);
     return () => { walletProvider.removeListener("accountsChanged", handler as (...args: unknown[]) => void); };
   }, []);
 
@@ -332,7 +334,7 @@ export default function WalletWidget() {
   }
 
   function handleApprove() {
-    if (!pending) return;
+    if (!pending || approving) return;
     if (pending.method === "eth_requestAccounts") void approveConnection();
     else if (pending.method === "personal_sign")   void approveSign();
     else                                           void approveSend();

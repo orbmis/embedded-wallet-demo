@@ -72,31 +72,21 @@ export default function ClientLayout() {
           </div>
         </main>
 
-        {/* Wallet panel — sidebar on md+, bottom sheet on mobile */}
-        <>
-          {/* Desktop sidebar */}
-          <aside className="hidden md:flex shrink-0 p-4 items-start pt-8 border-l border-slate-100">
-            <WalletWidget />
-          </aside>
-
-          {/* Mobile bottom sheet */}
-          {walletOpen && (
-            <div className="md:hidden fixed inset-0 z-40" onClick={() => !hasPending && setWalletOpen(false)}>
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-              <div
-                className="absolute bottom-0 left-0 right-0 animate-slide-up"
-                onClick={e => e.stopPropagation()}
-              >
-                <div className="bg-slate-50 rounded-t-2xl px-4 pt-3 pb-1">
-                  <div className="w-8 h-1 bg-slate-300 rounded-full mx-auto mb-3" />
-                </div>
-                <div className="bg-slate-50 pb-6 px-4 max-h-[80vh] overflow-y-auto flex justify-center">
-                  <WalletWidget />
-                </div>
-              </div>
-            </div>
-          )}
-        </>
+        {/* One wallet instance owns approvals on both desktop and mobile. */}
+        {walletOpen && (
+          <div
+            className="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+            onClick={() => !hasPending && setWalletOpen(false)}
+          />
+        )}
+        <aside
+          className={walletOpen
+            ? "fixed bottom-0 left-0 right-0 z-50 bg-slate-50 rounded-t-2xl px-4 pb-6 pt-3 max-h-[80vh] overflow-y-auto flex flex-col items-center md:static md:z-auto md:max-h-none md:rounded-none md:shrink-0 md:p-4 md:items-start md:pt-8 md:border-l md:border-slate-100"
+            : "hidden md:flex md:shrink-0 md:p-4 md:items-start md:pt-8 md:border-l md:border-slate-100"}
+        >
+          <div className="md:hidden w-8 h-1 bg-slate-300 rounded-full mx-auto mb-3 shrink-0" />
+          <WalletWidget />
+        </aside>
       </div>
     </div>
   );

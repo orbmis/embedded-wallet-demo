@@ -36,7 +36,6 @@ class EIP1193Provider {
   private _listeners = new Map<string, Set<(...args: unknown[]) => void>>();
 
   pendingRequest: PendingRequest | null = null;
-  onPendingRequest: ((req: PendingRequest | null) => void) | null = null; // primary (WalletWidget)
   private _pendingListeners = new Set<(req: PendingRequest | null) => void>();
 
   addPendingListener(fn: (req: PendingRequest | null) => void): () => void {
@@ -45,7 +44,6 @@ class EIP1193Provider {
   }
 
   private _notifyPending(req: PendingRequest | null): void {
-    this.onPendingRequest?.(req);
     this._pendingListeners.forEach(fn => fn(req));
   }
 
