@@ -10,12 +10,10 @@ export default function ClientLayout() {
   const [walletOpen, setWalletOpen] = useState(false);
   const [hasPending, setHasPending] = useState(false);
 
-  // Auto-open wallet panel on mobile when approval is needed
+  // Approvals render in their own portal; the wallet sheet opens only on request.
   useEffect(() => {
-    const unsub = walletProvider.addPendingListener(req => {
-      setHasPending(!!req);
-      if (req) setWalletOpen(true);
-    });
+    const unsub = walletProvider.addPendingListener(req => setHasPending(!!req));
+    setHasPending(!!walletProvider.pendingRequest);
     return unsub;
   }, []);
 
