@@ -112,7 +112,7 @@ These fields are passed directly to the OpenSigner iframe. Their effect on key d
 | **Paid bundler** | The Pimlico free tier has rate limits. Production traffic needs a paid plan or a self-hosted bundler (e.g. [Alto](https://github.com/pimlicoHQ/alto)) |
 | **Nexus / EntryPoint v0.7** | The demo uses Nexus 1.3.3 (MEE suite 2.2.3) with the MEE K1 validator and EntryPoint v0.7 (`0x0000000071727De22E5E9d8BAf0edAc6f37da032`). Pin deployment parameters and assess module installation controls before enabling extensions. Existing SimpleAccount assets require a separate migration. |
 | **Paymaster policy** | The current verifying paymaster sponsors all transactions unconditionally. Production needs policy: per-user gas limits, allowlisted target contracts, expiry, abuse detection |
-| **Multi-chain** | Verify Nexus factory, validator and EntryPoint deployments on each target chain; configure chain-specific public RPC, bundler/paymaster and UI state. Do not assume every EVM chain has matching deployments |
+| **Multi-chain** | Ethereum, Base and Arbitrum mainnets and Sepolia testnets are implemented with chain-specific clients and network switching locks. Use dedicated RPCs and funded, restricted sponsorship on mainnet. Deployment and bundler checks are available through `web/scripts/verify-nexus.ts --all`; mainnet transfers are not exercised by the live test script |
 | **Raw signing** | The OpenSigner iframe signs with EIP-191 and does not expose a raw `secp256k1` signing mode. EOA transactions (non-ERC-4337 chains, pre-ERC-4337 flows) are not possible without an iframe build that supports raw signing |
 
 ---

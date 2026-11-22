@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { authClient, signInWithGoogle, signUpEmail, signInEmail, signOut, getJwt } from "@/lib/auth";
 import { create, sign, signRaw, recover } from "@/lib/signer";
+import { getNetwork } from "@/lib/networks";
+import { useWalletNetwork } from "@/lib/useWalletNetwork";
 import { verifySignature } from "@/lib/chain";
 import { walletProvider, PROVIDER_INFO, type PendingRequest } from "@/lib/provider";
 import { formatEther, type Hex } from "viem";
@@ -43,17 +45,17 @@ function ApprovalModal({
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 sm:p-0">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onReject} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !approving && onReject()} />
 
       {/* Card */}
-      <div className="relative w-full max-w-sm max-h-[90dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl animate-slide-up sm:animate-fade-in">
+      <div role="dialog" aria-modal="true" aria-labelledby="wallet-approval-title" className="relative w-full max-w-sm max-h-[90dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl animate-slide-up sm:animate-fade-in">
         {/* Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-4">
           <div className="flex items-center gap-3">
             <img src={PROVIDER_INFO.icon} alt="" className="w-9 h-9 rounded-xl bg-white/20 p-1" />
             <div>
               <p className="text-xs text-indigo-200">{PROVIDER_INFO.name}</p>
-              <p className="text-white font-semibold">{title}</p>
+              <p id="wallet-approval-title" className="text-white font-semibold">{title}</p>
             </div>
           </div>
         </div>
@@ -106,7 +108,7 @@ function ApprovalModal({
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-slate-500">Network</dt>
-                    <dd className="text-slate-800">{pending.transaction.chainId === 11155111 ? "Sepolia" : `Chain ${pending.transaction.chainId}`}</dd>
+                    <dd className="text-slate-800">{`${getNetwork(pending.transaction.chainId).name} · ${getNetwork(pending.transaction.chainId).testnet ? "Testnet" : "Mainnet · real ETH"}`}</dd>
                   </div>
                 </dl>
               ) : (
@@ -140,7 +142,7 @@ function ApprovalModal({
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Network</span>
-                  <span className="text-slate-800">Sepolia</span>
+                  <span className="text-slate-800">{getNetwork(Number(walletProvider.chainId)).name}</span>
                 </div>
               </div>
             );
@@ -180,6 +182,7 @@ function ApprovalModal({
 export default function WalletWidget() {
   const { data: session, isPending } = authClient.useSession();
   const userId = session?.user.id;
+  const network = useWalletNetwork();
 
   const [state,            setState]           = useState<WalletState>("busy");
   const [address,          setAddress]         = useState("");
@@ -274,7 +277,7 @@ export default function WalletWidget() {
     try {
       const jwt = await getJwt();
       const enc = await getEncryptionParams(jwt);
-      const result = await create({ jwt, userId: session!.user.id, ...enc });
+      const result = await create({ jwt, userId: session!.user.id, chainId: network.chain.id, ...enc });
       const raw  = result as unknown as Record<string, unknown>;
       const addr = (raw["address"] ?? raw["account_address"] ?? "") as string;
       setAddress(addr);
@@ -345,7 +348,7 @@ export default function WalletWidget() {
       const tx = (pending.params as Record<string, string>[])[0]!;
       const valueWei = BigInt(tx["value"] ?? "0x0");
       const jwt = await getJwt();
-      const signableMsg = `Send ${formatEther(valueWei)} ETH to ${tx["to"]} on Sepolia`;
+      const signableMsg = `Send ${formatEther(valueWei)} ETH to ${tx["to"]} on ${network.name}`;
       const result = await sign({ jwt, message: signableMsg });
       const raw = result as unknown as Record<string, unknown>;
       const sig = (raw["signature"] ?? raw["sig"] ?? "") as string;

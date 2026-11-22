@@ -7,7 +7,8 @@ import {
   PROVIDER_INFO,
   type EIP6963ProviderInfo,
 } from "@/lib/provider";
-import { getSepoliaBalance } from "@/lib/chain";
+import { getBalance } from "@/lib/chain";
+import { getNetwork, getUserOperationUrl, type NetworkId } from "@/lib/networks";
 import { setupSmartAccount, type SmartAccountSetup } from "@/lib/erc4337";
 import { getAddress, parseEther, isAddress } from "viem";
 
@@ -77,16 +78,28 @@ function StepIndicator({ step }: { step: SendStep }) {
   );
 }
 
-export default function DApp() {
+export default function DApp({ networkId }: { networkId: NetworkId }) {
+  const [activeProvider, setActiveProvider] = useState(walletProvider);
+  return <NetworkDApp key={networkId} networkId={networkId} activeProvider={activeProvider} onProviderChange={setActiveProvider} />;
+}
+
+function NetworkDApp({ networkId, activeProvider, onProviderChange }: {
+  networkId: NetworkId;
+  activeProvider: typeof walletProvider;
+  onProviderChange: (provider: typeof walletProvider) => void;
+}) {
+  const network = getNetwork(networkId);
+  const explorer = network.chain.blockExplorers.default;
   const [wallets,    setWallets]    = useState<DiscoveredWallet[]>([]);
   const [dappState,  setDappState]  = useState<DAppState>("discover");
   const [ownerAddr,  setOwnerAddr]  = useState("");
-  const [activeProvider, setActiveProvider] = useState(walletProvider);
   const [saSetup,    setSaSetup]    = useState<SmartAccountSetup | null>(null);
   const [saLoading,  setSaLoading]  = useState(false);
   const [saError,    setSaError]    = useState<string | null>(null);
   const [balance,    setBalance]    = useState("");
   const [balLoading, setBalLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState("");
+  const balanceGeneration = useRef(0);
   const [tab,        setTab]        = useState<"send" | "receive">("send");
   const [sendTo,     setSendTo]     = useState("");
   const [sendAmt,    setSendAmt]    = useState("");
@@ -114,11 +127,21 @@ export default function DApp() {
 
   const refreshBalance = useCallback(async (addr: string) => {
     if (!addr) return;
+    const generation = ++balanceGeneration.current;
     setBalLoading(true);
-    const bal = await getSepoliaBalance(addr).catch(() => "0.000000");
-    setBalance(bal);
-    setBalLoading(false);
-  }, []);
+    setBalanceError("");
+    try {
+      const bal = await getBalance(addr, networkId);
+      if (generation === balanceGeneration.current) setBalance(bal);
+    } catch {
+      if (generation === balanceGeneration.current) {
+        setBalance("");
+        setBalanceError("Balance unavailable. Try refreshing.");
+      }
+    } finally {
+      if (generation === balanceGeneration.current) setBalLoading(false);
+    }
+  }, [networkId]);
 
   // Subscribe before reading accounts so readiness events cannot be missed.
   useEffect(() => {
@@ -153,34 +176,31 @@ export default function DApp() {
     let disposed = false;
     setSaSetup(null);
     setSaError(null);
+    setBalance("");
+    setBalanceError("");
     setSaLoading(!!ownerAddr);
     if (!ownerAddr) return;
     void (async () => {
       try {
-        const setup = await setupSmartAccount(getAddress(ownerAddr));
+        const setup = await setupSmartAccount(getAddress(ownerAddr), networkId, activeProvider);
         if (disposed) return;
         setSaSetup(setup);
-        setBalLoading(true);
-        const bal = await getSepoliaBalance(setup.saAddress).catch(() => "0.000000");
-        if (!disposed) {
-          setBalance(bal);
-          setBalLoading(false);
-        }
+        await refreshBalance(setup.saAddress);
       } catch (err) {
         if (!disposed) setSaError((err as Error).message);
       } finally {
         if (!disposed) setSaLoading(false);
       }
     })();
-    return () => { disposed = true; };
-  }, [ownerAddr]);
+    return () => { disposed = true; ++balanceGeneration.current; };
+  }, [ownerAddr, networkId, activeProvider, refreshBalance]);
 
   async function connect(wallet: DiscoveredWallet) {
     setDappState("connecting");
     try {
       const accounts = (await wallet.provider.request({ method: "eth_requestAccounts" })) as string[];
       const owner = accounts[0] ?? "";
-      setActiveProvider(wallet.provider);
+      onProviderChange(wallet.provider);
       setOwnerAddr(owner);
       setDappState(owner ? "connected" : "discover");
     } catch {
@@ -322,6 +342,9 @@ export default function DApp() {
   // ── Connected ───────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
+      <p className={`text-xs ${network.testnet ? "text-slate-500" : "text-amber-700"}`}>
+        {network.name} · {network.testnet ? "Testnet ETH" : "Mainnet · real ETH"}
+      </p>
       {/* Account card */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Gradient header — address left, balance right, all on same baseline */}
@@ -333,7 +356,7 @@ export default function DApp() {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-xs font-medium text-indigo-200">Nexus Account</span>
-                <span className="text-xs bg-white/20 text-white px-1.5 py-0.5 rounded-full font-medium">Sepolia</span>
+                <span className="text-xs bg-white/20 text-white px-1.5 py-0.5 rounded-full font-medium">{network.name}</span>
               </div>
               {saLoading ? (
                 <div className="h-4 w-32 bg-white/20 animate-pulse rounded mt-1" />
@@ -349,7 +372,7 @@ export default function DApp() {
           <div className="text-right shrink-0">
             <div className="flex items-center gap-1 justify-end">
               <span className="text-2xl font-bold text-white font-mono leading-none">
-                {saAddress ? (balance || "0.000000") : "—"}
+                {saAddress ? (balLoading ? "…" : balance || "—") : "—"}
               </span>
               <span className="text-xs text-indigo-200 self-end pb-0.5">ETH</span>
               {saAddress && (
@@ -361,14 +384,15 @@ export default function DApp() {
                 </button>
               )}
             </div>
-            {saAddress && (
-              <a href="https://www.alchemy.com/faucets/ethereum-sepolia" target="_blank" rel="noopener noreferrer"
+            {saAddress && network.testnet && (
+              <a href={`https://www.alchemy.com/faucets/${network.slug === "sepolia" ? "ethereum-sepolia" : network.slug}`} target="_blank" rel="noopener noreferrer"
                 className="text-xs text-indigo-200 hover:text-white">
                 Get test ETH ↗
               </a>
             )}
           </div>
         </div>
+        {balanceError && <p role="status" className="px-4 pt-2 text-xs text-amber-700">{balanceError}</p>}
         {/* Footer — owner key */}
         <div className="px-4 py-2.5 border-t border-slate-50">
           <p className="text-xs text-slate-400">
@@ -380,7 +404,8 @@ export default function DApp() {
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
         {(["send", "receive"] as const).map(t => (
-          <button key={t} onClick={() => { setTab(t); setTxResult(null); setSendStep("idle"); }}
+          <button key={t} disabled={isSending}
+            onClick={() => { setTab(t); setTxResult(null); setSendStep("idle"); }}
             className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all capitalize
               ${tab === t ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"}`}>
             {t}
@@ -401,6 +426,7 @@ export default function DApp() {
               <input
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-mono placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all"
                 placeholder="0x..."
+                disabled={isSending}
                 value={sendTo}
                 onChange={e => { setSendTo(e.target.value); setTxResult(null); setSendStep("idle"); }}
               />
@@ -412,6 +438,7 @@ export default function DApp() {
                   className="w-full border border-slate-200 rounded-xl px-3 py-2.5 pr-14 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all"
                   placeholder="0.001"
                   type="number" step="any" min="0"
+                  disabled={isSending}
                   value={sendAmt}
                   onChange={e => { setSendAmt(e.target.value); setTxResult(null); setSendStep("idle"); }}
                 />
@@ -446,7 +473,7 @@ export default function DApp() {
                   <p className="text-sm font-semibold text-amber-800">⏳ Transaction submitted</p>
                   <p className="text-xs text-amber-700">Waiting for confirmation on-chain.</p>
                   {txResult.userOpHash && (
-                    <a href={`https://jiffyscan.xyz/userOpHash/${txResult.userOpHash}?network=sepolia`}
+                    <a href={getUserOperationUrl(networkId, txResult.userOpHash)}
                       target="_blank" rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 underline">
                       Track on JiffyScan ↗
@@ -468,15 +495,15 @@ export default function DApp() {
                       <p className="font-mono text-xs text-slate-500 bg-white rounded-lg p-2 border border-emerald-100 truncate">
                         {txResult.txHash}
                       </p>
-                      <a href={`https://sepolia.etherscan.io/tx/${txResult.txHash}`}
+                      <a href={`${explorer.url}/tx/${txResult.txHash}`}
                         target="_blank" rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-white px-3 py-1.5 rounded-lg border border-indigo-100">
-                        View on Sepolia Etherscan ↗
+                        View on {explorer.name} ↗
                       </a>
                     </>
                   )}
                   {txResult.userOpHash && (
-                    <a href={`https://jiffyscan.xyz/userOpHash/${txResult.userOpHash}?network=sepolia`}
+                    <a href={getUserOperationUrl(networkId, txResult.userOpHash)}
                       target="_blank" rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 underline">
                       UserOp on JiffyScan ↗
@@ -500,7 +527,7 @@ export default function DApp() {
                 </svg>
               </div>
               <div>
-                <p className="text-xs font-medium text-slate-500 mb-2">Your Nexus Account address</p>
+                <p className="text-xs font-medium text-slate-500 mb-2">Your Nexus Account address on {network.name}</p>
                 <div className="p-3 bg-slate-50 rounded-xl font-mono text-xs break-all text-slate-700 border border-slate-100">
                   {saAddress}
                 </div>
@@ -511,10 +538,10 @@ export default function DApp() {
                   className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
                   {copied ? "✓ Copied!" : "Copy address"}
                 </button>
-                <a href={`https://sepolia.etherscan.io/address/${saAddress}`}
+                <a href={`${explorer.url}/address/${saAddress}`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors">
-                  Etherscan ↗
+                  {explorer.name} ↗
                 </a>
               </div>
             </>
@@ -524,7 +551,7 @@ export default function DApp() {
         </div>
       )}
 
-      <button onClick={disconnect} className="w-full text-xs text-slate-400 hover:text-slate-600 py-2 transition-colors">
+      <button disabled={isSending} onClick={disconnect} className="w-full text-xs text-slate-400 hover:text-slate-600 py-2 transition-colors">
         Disconnect
       </button>
     </div>

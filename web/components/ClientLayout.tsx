@@ -1,12 +1,15 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
+import NetworkSelector from "./NetworkSelector";
+import { useWalletNetwork } from "@/lib/useWalletNetwork";
 import { walletProvider } from "@/lib/provider";
 
 const DApp       = dynamic(() => import("./DApp"),         { ssr: false });
 const WalletWidget = dynamic(() => import("./WalletWidget"), { ssr: false });
 
 export default function ClientLayout() {
+  const network = useWalletNetwork();
   const [walletOpen, setWalletOpen] = useState(false);
   const [hasPending, setHasPending] = useState(false);
 
@@ -28,16 +31,13 @@ export default function ClientLayout() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
               </svg>
             </div>
-            <span className="font-semibold text-slate-900 text-sm">OpenSigner</span>
+            <span className="sr-only sm:not-sr-only font-semibold text-slate-900 text-sm">OpenSigner</span>
             <span className="hidden sm:inline text-slate-300 text-sm">·</span>
             <span className="hidden sm:inline text-slate-500 text-xs">Embedded Wallet Demo</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse-dot" />
-              Sepolia testnet
-            </span>
+            <NetworkSelector />
             {/* Mobile wallet toggle */}
             <button
               onClick={() => setWalletOpen(o => !o)}
@@ -61,12 +61,12 @@ export default function ClientLayout() {
         <main className="flex-1 overflow-y-auto p-4 sm:p-8">
           <div className="max-w-xl mx-auto">
             <div className="mb-8">
-              <h1 className="text-2xl font-bold text-slate-900">Sepolia dApp</h1>
+              <h1 className="text-2xl font-bold text-slate-900">{network.name} dApp</h1>
               <p className="text-slate-500 mt-1 text-sm">
                 Send and receive ETH using your embedded wallet.
               </p>
             </div>
-            <DApp />
+            <DApp networkId={network.chain.id} />
           </div>
         </main>
 

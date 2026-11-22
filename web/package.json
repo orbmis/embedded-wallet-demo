@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e:networks": "playwright test --config playwright.networks.config.ts"
   },
   "dependencies": {
     "@biconomy/abstractjs": "2.0.3",

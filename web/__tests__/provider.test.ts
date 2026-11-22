@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { walletProvider } from "../lib/provider";
+
+beforeEach(async () => {
+  await walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0xaa36a7" }] });
+});
 
 afterEach(() => {
   walletProvider.rejectPending();
@@ -63,5 +67,52 @@ describe("wallet approval lifecycle", () => {
     } finally {
       offActive();
     }
+  });
+});
+
+
+describe("network switching", () => {
+  it("updates both chain methods and emits chainChanged without clearing the account", async () => {
+    walletProvider.setAccount("0x1111111111111111111111111111111111111111");
+    const changed = vi.fn();
+    walletProvider.on("chainChanged", changed);
+    try {
+      await walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x2105" }] });
+      await expect(walletProvider.request({ method: "eth_chainId" })).resolves.toBe("0x2105");
+      await expect(walletProvider.request({ method: "net_version" })).resolves.toBe("8453");
+      expect(changed).toHaveBeenCalledExactlyOnceWith("0x2105");
+      expect(walletProvider.accounts).toHaveLength(1);
+    } finally { walletProvider.removeListener("chainChanged", changed); }
+  });
+
+  it.each([{ chainId: "0xa" }, { chainId: "8453" }, { chainId: null }])("rejects unsupported or malformed switch $chainId", async params => {
+    await expect(walletProvider.request({ method: "wallet_switchEthereumChain", params: [params] })).rejects.toHaveProperty("code");
+    expect(walletProvider.networkId).toBe(11155111);
+  });
+
+  it("locks switching through building and confirmation, then unlocks", async () => {
+    const release = walletProvider.beginTransaction(11155111);
+    try {
+      await expect(walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x1" }] })).rejects.toMatchObject({ code: -32002 });
+      expect(walletProvider.networkId).toBe(11155111);
+    } finally { release(); }
+    await walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x1" }] });
+    expect(walletProvider.networkId).toBe(1);
+  });
+
+  it("does not switch while an approval is pending", async () => {
+    const pending = walletProvider.request({ method: "personal_sign" });
+    await expect(walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x1" }] })).rejects.toMatchObject({ code: -32002 });
+    walletProvider.approvePending("0xsignature");
+    await pending;
+  });
+
+  it("rejects stale prepared transactions and requests for another chain", async () => {
+    await walletProvider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x1" }] });
+    expect(() => walletProvider.beginTransaction(11155111)).toThrow("Network changed");
+    await expect(walletProvider.request({ method: "personal_sign", transaction: {
+      from: "0xowner", to: "0xto", valueWei: "1", chainId: 11155111,
+    } })).rejects.toMatchObject({ code: 4901 });
+    expect(walletProvider.pendingRequest).toBeNull();
   });
 });

@@ -11,7 +11,7 @@ A local two-panel web app (`http://localhost:7060`) that shows an end-to-end emb
 | Recover wallet on a new device (incognito window) | Wallet panel |
 | Wallet announces itself via **EIP-6963** | Automatic on load |
 | Embedded wallet connection synchronizes automatically when ready; other discovered wallets can be selected manually | dApp ← Wallet panel |
-| dApp shows Nexus Account address and Sepolia balance | dApp |
+| dApp shows Nexus Account address and balance on the selected network | dApp |
 | **Send ETH** → review amount, sender, recipient and network → approve → Pimlico broadcasts → Etherscan link | dApp ← Wallet panel |
 | **Receive** tab shows full address for funding | dApp |
 
@@ -22,11 +22,11 @@ Browser (localhost:7060, Next.js)
 │
 ├── DApp (left panel)
 │   ├── EIP-6963 wallet discovery (eip6963:requestProvider event)
-│   ├── Balance: viem publicClient → Sepolia RPC
+│   ├── Network selector → chain-specific viem public client → RPC
 │   └── Send: permissionless SmartAccountClient
 │            ├── buildUserOp → personal_sign → Wallet panel approval
 │            ├── Pimlico verifying paymaster (sponsors gas)
-│            └── Pimlico bundler → Sepolia on-chain
+│            └── Chain-specific Pimlico bundler → selected network
 │
 └── Wallet panel (desktop sidebar / mobile sheet opened with Wallet button)
     ├── better-auth client → auth_service :7052 ──OAuth──▶ Google
@@ -125,7 +125,46 @@ pnpm dev
 
 Refresh the browser after restarting. The account card and Receive tab display the new Nexus address.
 
-The existing Sepolia `NEXT_PUBLIC_PIMLICO_URL` can be retained if its bundler and paymaster support EntryPoint v0.7. No new signing key or backend account is required. Modules such as session keys and recovery validators are not installed by this migration. The selected suite initializes without a module registry; review module installation controls before adding extensions in production.
+The existing Sepolia `NEXT_PUBLIC_PIMLICO_URL` can be retained. Standard Pimlico `/v2/<chain>/rpc` URLs are routed to the selected chain while preserving their API key; custom legacy URLs apply only to Ethereum Sepolia. The bundler and paymaster must support EntryPoint v0.7. No new signing key or backend account is required. Modules such as session keys and recovery validators are not installed by this migration. The selected suite initializes without a module registry; review module installation controls before adding extensions in production.
+
+---
+
+## Supported networks
+
+The header network selector supports all six networks. Ethereum Sepolia is the default; the last selected network is saved in browser storage.
+
+| Network | Chain ID | Environment |
+|---|---:|---|
+| Ethereum | 1 | Mainnet |
+| Ethereum Sepolia | 11155111 | Testnet |
+| Base | 8453 | Mainnet |
+| Base Sepolia | 84532 | Testnet |
+| Arbitrum One | 42161 | Mainnet |
+| Arbitrum Sepolia | 421614 | Testnet |
+
+Balances, Nexus deployment, signing hashes, approval details, faucets and explorer links follow the selected network. Mainnet transfers use real ETH; faucets appear only on testnets. Switching networks resets the transfer form and result, and rebuilds the account client. Network switching is locked while a wallet approval or transaction is in progress. Failed balance reads display an error rather than a zero balance.
+
+The same OpenSigner owner key is reused across networks. The pinned Nexus deployment suite derives the same address on these six networks, but **deployment, funds and permissions are separate on each chain**. Switching networks does not bridge or transfer funds. Send funds to the Receive address on the selected network.
+
+### RPC and sponsorship configuration
+
+Set one Pimlico key in `web/.env.local` to route requests to all six chains:
+
+```dotenv
+NEXT_PUBLIC_PIMLICO_API_KEY=YOUR_KEY
+```
+
+Existing standard `NEXT_PUBLIC_PIMLICO_URL` configurations also work. Optional overrides use these suffixes: `ETHEREUM`, `SEPOLIA`, `BASE`, `BASE_SEPOLIA`, `ARBITRUM`, `ARBITRUM_SEPOLIA`.
+
+```dotenv
+# Optional: dedicated public RPC and bundler/paymaster for one network
+NEXT_PUBLIC_RPC_URL_BASE=https://YOUR_BASE_RPC
+NEXT_PUBLIC_PIMLICO_URL_BASE=https://YOUR_BASE_BUNDLER_RPC
+```
+
+Endpoint priority is a network-specific Pimlico URL, then the shared API key, then the legacy URL. Without a public RPC override the app uses viem's public endpoint for that chain. Dedicated RPCs are recommended for production; public endpoints may be rate-limited. Restart the dev server after changing environment variables.
+
+Mainnet sponsorship requires a funded Pimlico account and appropriate sponsorship policies. The app uses the configured verifying paymaster and has no automatic fallback to user-paid gas. Configure spending and target restrictions with the sponsor before using mainnet. As in the original POC, `NEXT_PUBLIC_*` configuration is browser-visible; production deployments should proxy or restrict provider credentials (see `PRODUCTION.md`).
 
 ---
 
@@ -225,7 +264,7 @@ This is idempotent — re-running skips if `web/.env.local` already has the keys
 2. Create an API key
 3. Append to `web/.env.local`:
    ```
-   NEXT_PUBLIC_PIMLICO_URL=https://api.pimlico.io/v2/sepolia/rpc?apikey=YOUR_KEY
+   NEXT_PUBLIC_PIMLICO_API_KEY=YOUR_KEY
    ```
 
 Without this, the wallet and signing work, but the Send button will error.
@@ -252,7 +291,10 @@ make dev      # Next.js dev server on http://localhost:7060
 | `NEXT_PUBLIC_HOT_STORAGE_URL` | Client | `http://localhost:7054` |
 | `NEXT_PUBLIC_COLD_STORAGE_URL` | Client | `http://localhost:7053` |
 | `NEXT_PUBLIC_IFRAME_URL` | Client | `http://localhost:7050/index.html?debug=true` |
-| `NEXT_PUBLIC_PIMLICO_URL` | Client | Pimlico bundler+paymaster RPC URL — **add this manually** |
+| `NEXT_PUBLIC_PIMLICO_API_KEY` | Client | Shared Pimlico key for all supported networks |
+| `NEXT_PUBLIC_PIMLICO_URL` | Client | Backward-compatible Pimlico URL; standard URLs are routed per chain |
+| `NEXT_PUBLIC_PIMLICO_URL_<SUFFIX>` | Client | Optional per-network bundler/paymaster URL override |
+| `NEXT_PUBLIC_RPC_URL_<SUFFIX>` | Client | Optional per-network public RPC override; suffixes listed above |
 
 ### `.env.opensigner` — generated by `make setup`
 
@@ -277,7 +319,7 @@ NEXT_PUBLIC_DEV_EMAIL_LOGIN=true make dev
 
 ## Wallet connection and mobile behavior
 
-The dApp reads the embedded provider's current account and listens for account changes. When the wallet becomes ready, the dApp initializes the Nexus account automatically. Logout clears the connection. Background session refreshes for the same user preserve the connection and transaction UI.
+The dApp reads the embedded provider's current account and listens for account changes. When the wallet becomes ready, the dApp initializes the Nexus account automatically. Logout clears the connection. Background session refreshes for the same user preserve the connection and transaction UI. The network selector preserves the login and owner key when changing chains.
 
 On mobile, the **Wallet** button opens the wallet sheet. Transaction approvals appear in a separate modal and do not automatically open the sheet. The modal displays the amount, full sender and recipient addresses, network, gas sponsorship and an expandable signing hash. Approval shows signing progress, then closes after signing; the dApp continues showing submission and confirmation progress.
 
@@ -308,17 +350,32 @@ User clicks Send
 
 Use Node.js 22.13 or newer for the current tooling. Run `pnpm test`, `pnpm exec tsc --noEmit` and `pnpm build` from `web/`.
 
-A read-only live Sepolia check is available from `web/`:
+Read-only deployment, RPC and bundler checks are available from `web/`:
 
 ```bash
-node --env-file=.env.local --import tsx scripts/verify-nexus.ts
+node --env-file=.env.local --import tsx scripts/verify-nexus.ts         # Ethereum Sepolia
+node --env-file=.env.local --import tsx scripts/verify-nexus.ts --all   # All six networks
 ```
 
-This checks deployment bytecode, bundler EntryPoint v0.7 support, and deterministic Nexus address derivation. It never signs or submits a transaction. An optional live transaction check is also available. It creates a fresh temporary test key and submits a **zero-ETH transfer on Sepolia**, with gas paid by the configured Pimlico sponsorship. It does not use the logged-in user's wallet:
+This checks deployment bytecode, bundler EntryPoint v0.7 support, and deterministic Nexus address derivation. It never signs or submits a transaction. An optional live transaction check is also available. It creates a fresh temporary test key and submits a **zero-ETH transfer on a testnet**, with gas paid by the configured Pimlico sponsorship. It does not use the logged-in user's wallet:
 
 ```bash
-node --env-file=.env.local --import tsx scripts/verify-nexus-transfer.ts
+node --env-file=.env.local --import tsx scripts/verify-nexus-transfer.ts          # Ethereum Sepolia
+node --env-file=.env.local --import tsx scripts/verify-nexus-transfer.ts 84532    # Base Sepolia
+node --env-file=.env.local --import tsx scripts/verify-nexus-transfer.ts 421614   # Arbitrum Sepolia
 ```
+
+The live transfer script refuses mainnet chain IDs. Mainnet validation uses read-only checks.
+
+The browser regression suite mocks RPC and authentication and sends no transactions:
+
+```bash
+cd web
+pnpm build
+pnpm test:e2e:networks
+```
+
+It uses an isolated server on port 7061 and covers network switching, balances, receive links, saved selection, and mobile approvals.
 
 Unit tests additionally exercise the real Nexus SDK's EIP-191 UserOperation signing through the wallet provider, approval metadata, rejected signatures, execution failure, pending confirmations and overlapping sends.
 
@@ -359,9 +416,9 @@ The legacy Playwright suite uses email/password login, but its selectors target 
 | `make dev` → `No rule to make target 'dev'` | Wrong directory. Run from the project root: `cd embedded-wallet-demo` |
 | `make bootstrap` → `bootstrap requires Node ≥22` | Run `nvm use 22` first, or the Makefile will find it automatically if nvm is installed |
 | Broken pnpm lockfile | Delete `web/pnpm-lock.yaml` and re-run `make bootstrap` |
-| `SA setup failed` in dApp | `NEXT_PUBLIC_PIMLICO_URL` missing from `web/.env.local`. Restart dev server after adding it |
+| `SA setup failed` in dApp | Pimlico credentials missing, wrong-chain RPC, or deployment check failure. Configure the selected network and restart the dev server |
 | `401 Unauthorized` from Pimlico | API key wrong or expired. Check `dashboard.pimlico.io` |
-| `AA21 didn't pay prefund` | Paymaster not wired up. Ensure `NEXT_PUBLIC_PIMLICO_URL` is set and server was restarted |
+| `AA21 didn't pay prefund` | Paymaster not wired up. Check the selected network's Pimlico credentials and sponsorship funding/policies |
 | Postgres password error after editing `.env` | Password is fixed at volume creation time. `make nuke` (destroys data) then `make up` |
 | Shield keeps restarting | Normal under repeated test load. The fallback in `/api/shield/session` handles it; wait ~10s |
 

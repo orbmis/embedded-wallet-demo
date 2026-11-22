@@ -1,4 +1,5 @@
 "use client";
+import { DEFAULT_NETWORK_ID, getNetwork, NETWORK_STORAGE_KEY, type NetworkId } from "./networks";
 
 // EIP-6963 provider info type
 export interface EIP6963ProviderInfo {
@@ -40,7 +41,8 @@ class EIP1193Provider {
   readonly isOpenSigner = true;
 
   private _accounts: string[] = [];
-  private _chainId = "0xaa36a7"; // Sepolia
+  private _networkId: NetworkId = DEFAULT_NETWORK_ID;
+  private _transactionActive = false;
   private _listeners = new Map<string, Set<(...args: unknown[]) => void>>();
 
   pendingRequest: PendingRequest | null = null;
@@ -56,7 +58,34 @@ class EIP1193Provider {
   }
 
   get accounts() { return [...this._accounts]; }
-  get chainId() { return this._chainId; }
+  get chainId() { return `0x${this._networkId.toString(16)}`; }
+  get networkId() { return this._networkId; }
+  get transactionActive() { return this._transactionActive; }
+
+  beginTransaction(id: NetworkId): () => void {
+    if (id !== this._networkId) throw new Error("Network changed. Please prepare the transaction again.");
+    if (this._transactionActive || this.pendingRequest) throw new Error("A wallet request is already in progress");
+    this._transactionActive = true;
+    this._emit("transactionChanged");
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._transactionActive = false;
+      this._emit("transactionChanged");
+    };
+  }
+
+  private _switchNetwork(id: NetworkId): void {
+    getNetwork(id);
+    if (id === this._networkId) return;
+    if (this._transactionActive || this.pendingRequest) {
+      throw { code: -32002, message: "Wait for the current wallet request to finish before switching networks." };
+    }
+    this._networkId = id;
+    try { window.localStorage.setItem(NETWORK_STORAGE_KEY, String(id)); } catch { /* storage may be unavailable */ }
+    this._emit("chainChanged", this.chainId);
+  }
   get isConnected() { return this._accounts.length > 0; }
 
   setAccount(address: string | null): void {
@@ -64,15 +93,26 @@ class EIP1193Provider {
     if (next[0] !== this._accounts[0]) {
       this._accounts = next;
       this._emit("accountsChanged", next);
-      if (next.length > 0) this._emit("connect", { chainId: this._chainId });
+      if (next.length > 0) this._emit("connect", { chainId: this.chainId });
       else this._emit("disconnect", new Error("Wallet disconnected"));
     }
   }
 
   async request({ method, params = [], transaction }: { method: string; params?: unknown[]; transaction?: TransactionDetails }): Promise<unknown> {
     switch (method) {
-      case "eth_chainId":       return this._chainId;
-      case "net_version":       return "11155111";
+      case "eth_chainId":       return this.chainId;
+      case "net_version":       return String(this._networkId);
+      case "wallet_switchEthereumChain": {
+        const id = (params[0] as { chainId?: unknown } | undefined)?.chainId;
+        if (typeof id !== "string" || !/^0x[0-9a-f]+$/i.test(id)) {
+          throw { code: -32602, message: "chainId must be a hexadecimal string" };
+        }
+        let network;
+        try { network = getNetwork(Number(BigInt(id))); }
+        catch { throw { code: 4902, message: "Unsupported network" }; }
+        this._switchNetwork(network.chain.id);
+        return null;
+      }
       case "eth_accounts":      return this._accounts;
       case "eth_requestAccounts":
         if (this._accounts.length > 0) return this._accounts;
@@ -86,6 +126,10 @@ class EIP1193Provider {
   }
 
   private _queue(method: PendingRequestMethod, params: unknown[], transaction?: TransactionDetails): Promise<unknown> {
+    if (this.pendingRequest) return Promise.reject({ code: -32002, message: "A wallet request is already pending" });
+    if (transaction && transaction.chainId !== this._networkId) {
+      return Promise.reject({ code: 4901, message: "Transaction network does not match the selected network" });
+    }
     return new Promise((resolve, reject) => {
       this.pendingRequest = { id: crypto.randomUUID(), method, params, resolve, reject, transaction: transaction ? { ...transaction } : undefined };
       this._notifyPending(this.pendingRequest);
