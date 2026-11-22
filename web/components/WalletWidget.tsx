@@ -131,29 +131,6 @@ export default function WalletWidget() {
         return;
       }
 
-      // Probe: sign a short message and verify against the known address.
-      // If verification passes, the device share is present in IndexedDB.
-      // If not (fresh context / new device), go to needsRecovery.
-      log("probing device share...");
-      try {
-        const probeMsg = "opensigner-probe-" + accountId.slice(0, 8);
-        const probeSig = await sign({ jwt, message: probeMsg });
-        const probeRaw = probeSig as unknown as Record<string, unknown>;
-        const probeSigValue = (probeRaw["signature"] ?? probeRaw["sig"] ?? "") as string;
-        if (!probeSigValue) throw new Error("no signature returned");
-        const probeOk = await verifySignature(address, probeMsg, probeSigValue as `0x${string}`);
-        if (!probeOk) {
-          log("probe: wrong key → needsRecovery");
-          setState("needsRecovery");
-          return;
-        }
-        log("probe: device share present");
-      } catch (e) {
-        log(`probe error: ${(e as Error).message} → needsRecovery`);
-        setState("needsRecovery");
-        return;
-      }
-
       const bal = await getSepoliaBalance(address).catch(() => "0.000000");
       setWallet({ address, accountId, balance: bal });
       setState("ready");
@@ -245,7 +222,8 @@ export default function WalletWidget() {
       log(`signature: ${trunc(sigValue, 16)}`);
       const ok = await verifySignature(wallet.address, message, sigValue as Hex);
       setSigResult({ sig: sigValue, ok });
-      log(`verify: ${ok ? "✓ signer matches" : "✗ mismatch"}`);
+      log(`verify: ${ok ? "✓ signer matches" : "✗ mismatch — device share may be missing"}`);
+      if (!ok) setError("Signature mismatch — device share may be missing on this device. Try recovering.");
       setState("ready");
     } catch (err) {
       setError((err as Error).message);
