@@ -57,6 +57,31 @@ Scoped to the iframe's origin, not the app's origin. This means:
 #### Recovery
 When the device share is missing, the iframe fetches the hot and cold shares (2-of-3 is sufficient), reconstructs the key, and re-stores the device share in the new browser's IndexedDB.
 
+#### Cross-device and cross-dApp identity
+
+The wallet's identity is anchored to the **user ID in `auth_service`**, which is permanently bound to the Google account. This means:
+
+```
+Same Google account
+  → same user ID in JWT
+  → same account in hot_storage  →  same hot share
+  → same user in Shield          →  same cold share
+  → same private key on reconstruction
+  → same EOA address
+  → same SimpleAccount address (factory + salt are hardcoded constants)
+```
+
+| Scenario | Same address? | Notes |
+|---|---|---|
+| Same Google account, same computer | ✓ immediately | Device share already in IndexedDB |
+| Same Google account, new computer or browser | ✓ after one recovery click | Hot + cold shares reconstruct the key; device share written to new IndexedDB |
+| Same Google account, different dApp (same backend) | ✓ | dApp is irrelevant to wallet identity |
+| Different `auth_service` instance | ✗ | Different user ID → new account created |
+| Same backend, different SimpleAccount factory or salt | ✗ | EOA is the same; Smart Account address differs |
+| Browser storage cleared before recovery | ✗ device share lost | Key is still recoverable from hot + cold — click Recover |
+
+The recovery step on a new device is intentional: it is a security checkpoint. A new browser must prove it can authenticate (obtain a valid JWT) before the key is reconstructed there.
+
 #### Security implication in this demo
 
 ```
