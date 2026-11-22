@@ -5,8 +5,9 @@ import {
   announceEIP6963Provider,
   type EIP6963ProviderInfo,
 } from "@/lib/provider";
-import { getSepoliaBalance, verifySignature } from "@/lib/chain";
-import { getAddress, parseEther, formatEther, isAddress, type Hex } from "viem";
+import { getSepoliaBalance } from "@/lib/chain";
+import { setupSmartAccount, type SmartAccountSetup } from "@/lib/erc4337";
+import { getAddress, parseEther, isAddress } from "viem";
 
 interface DiscoveredWallet {
   info: EIP6963ProviderInfo;
@@ -17,14 +18,16 @@ type DAppState = "discover" | "connecting" | "connected";
 
 interface TxResult {
   ok: boolean;
-  signature?: string;
+  txHash?: string;
   error?: string;
 }
 
 export default function DApp() {
   const [wallets, setWallets] = useState<DiscoveredWallet[]>([]);
   const [dappState, setDappState] = useState<DAppState>("discover");
-  const [address, setAddress] = useState("");
+  const [ownerAddress, setOwnerAddress] = useState("");
+  const [saSetup, setSaSetup] = useState<SmartAccountSetup | null>(null);
+  const [saLoading, setSaLoading] = useState(false);
   const [balance, setBalance] = useState("");
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [tab, setTab] = useState<"send" | "receive">("send");
@@ -71,17 +74,27 @@ export default function DApp() {
       const accounts = (await wallet.provider.request({
         method: "eth_requestAccounts",
       })) as string[];
-      const addr = accounts[0] ?? "";
-      setAddress(addr);
+      const owner = accounts[0] ?? "";
+      setOwnerAddress(owner);
       setDappState("connected");
-      void refreshBalance(addr);
 
-      // Keep balance synced when accounts change
+      // Compute ERC-4337 SimpleAccount address from owner key
+      setSaLoading(true);
+      try {
+        const setup = await setupSmartAccount(getAddress(owner));
+        setSaSetup(setup);
+        void refreshBalance(setup.saAddress);
+      } catch {
+        // SA setup failed — still show connected, just no send
+      } finally {
+        setSaLoading(false);
+      }
+
       wallet.provider.on("accountsChanged", (accs: unknown) => {
-        const newAddr = (accs as string[])[0] ?? "";
-        setAddress(newAddr);
-        if (newAddr) void refreshBalance(newAddr);
-        else setDappState("discover");
+        const newOwner = (accs as string[])[0] ?? "";
+        if (!newOwner) { disconnect(); return; }
+        setOwnerAddress(newOwner);
+        setSaSetup(null);
       });
     } catch {
       setDappState("discover");
@@ -90,7 +103,8 @@ export default function DApp() {
 
   function disconnect() {
     walletProvider.setAccount(null);
-    setAddress("");
+    setOwnerAddress("");
+    setSaSetup(null);
     setBalance("");
     setDappState("discover");
     setTxResult(null);
@@ -98,26 +112,20 @@ export default function DApp() {
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!isAddress(sendTo) || !sendAmount) return;
+    if (!isAddress(sendTo) || !sendAmount || !saSetup) return;
     setSending(true);
     setTxResult(null);
     try {
-      const result = await walletProvider.request({
-        method: "eth_sendTransaction",
-        params: [{
-          from: address,
-          to: sendTo,
-          value: "0x" + parseEther(sendAmount).toString(16),
-          chainId: "0xaa36a7",
-        }],
-      });
-      // Result is signature (not tx hash — raw signing unavailable)
-      setTxResult({ ok: true, signature: result as string });
-      void refreshBalance(address);
+      const txHash = await saSetup.send(
+        getAddress(sendTo),
+        parseEther(sendAmount),
+      );
+      setTxResult({ ok: true, txHash });
+      void refreshBalance(saSetup.saAddress);
     } catch (err: unknown) {
       const e = err as { code?: number; message?: string };
       if (e.code === 4001) {
-        setTxResult({ ok: false, error: "Rejected by user." });
+        setTxResult({ ok: false, error: "Rejected." });
       } else {
         setTxResult({ ok: false, error: e.message ?? "Unknown error" });
       }
@@ -167,41 +175,61 @@ export default function DApp() {
     );
   }
 
+  const saAddress = saSetup?.saAddress ?? "";
+
   // ── Connected state ───────────────────────────────────────────────────────
   return (
     <div className="max-w-lg mx-auto w-full">
       {/* Account bar */}
-      <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm border border-gray-100 mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500" />
-          <div>
-            <p className="text-xs text-gray-400">Connected</p>
-            <p className="text-sm font-mono font-medium">
-              {address.slice(0, 8)}…{address.slice(-6)}
-            </p>
+      <div className="p-4 bg-white rounded-2xl shadow-sm border border-gray-100 mb-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 shrink-0" />
+            <div>
+              <p className="text-xs text-gray-400">Smart Account · Sepolia</p>
+              {saLoading ? (
+                <p className="text-xs text-gray-400">Computing address…</p>
+              ) : saAddress ? (
+                <p className="text-sm font-mono font-medium">
+                  {saAddress.slice(0, 10)}…{saAddress.slice(-6)}
+                </p>
+              ) : (
+                <p className="text-xs text-red-400">SA setup failed</p>
+              )}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="flex items-center gap-1 justify-end">
+              <p className="text-lg font-bold">
+                {saAddress ? (balance || "—") : "—"}
+                <span className="text-sm font-normal text-gray-500 ml-1">ETH</span>
+              </p>
+              {saAddress && (
+                <button
+                  onClick={() => refreshBalance(saAddress)}
+                  disabled={balanceLoading}
+                  className={`text-gray-400 hover:text-indigo-600 ${balanceLoading ? "animate-spin" : ""}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {saAddress && (
+              <a
+                href={`https://www.alchemy.com/faucets/ethereum-sepolia`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs text-indigo-500 hover:underline"
+              >
+                Get test ETH ↗
+              </a>
+            )}
           </div>
         </div>
-        <div className="text-right">
-          <div className="flex items-center gap-1 justify-end">
-            <p className="text-lg font-bold">{balance || "—"} <span className="text-sm font-normal text-gray-500">ETH</span></p>
-            <button
-              onClick={() => refreshBalance(address)}
-              disabled={balanceLoading}
-              className={`text-gray-400 hover:text-indigo-600 ${balanceLoading ? "animate-spin" : ""}`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-          </div>
-          <a
-            href="https://www.alchemy.com/faucets/ethereum-sepolia"
-            target="_blank" rel="noopener noreferrer"
-            className="text-xs text-indigo-500 hover:underline"
-          >
-            Get test ETH ↗
-          </a>
-        </div>
+        <p className="text-xs text-gray-400">
+          Owner key: <span className="font-mono">{ownerAddress.slice(0, 10)}…{ownerAddress.slice(-4)}</span>
+        </p>
       </div>
 
       {/* Tabs */}
@@ -245,24 +273,32 @@ export default function DApp() {
             </div>
             <button
               type="submit"
-              disabled={sending || !isAddress(sendTo) || !sendAmount}
+              disabled={sending || !isAddress(sendTo) || !sendAmount || !saSetup}
               className="w-full bg-indigo-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 transition-colors"
             >
-              {sending ? "Waiting for wallet…" : "Send"}
+              {sending ? "Submitting…" : !saSetup ? "Setting up account…" : "Send"}
             </button>
           </form>
 
           {txResult && (
-            <div className={`mt-4 p-3 rounded-lg text-sm ${txResult.ok ? "bg-green-50 border border-green-200 text-green-800" : "bg-red-50 border border-red-200 text-red-700"}`}>
+            <div className={`mt-4 p-3 rounded-xl text-sm ${txResult.ok ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
               {txResult.ok ? (
-                <>
-                  <p className="font-medium">✓ Transaction signed</p>
-                  <p className="text-xs mt-1 text-gray-500">
-                    Signature: <span className="font-mono">{txResult.signature?.slice(0, 20)}…</span>
-                  </p>
-                </>
+                <div className="space-y-2">
+                  <p className="font-medium text-green-800">✓ Transaction confirmed</p>
+                  <div className="flex items-center gap-2 font-mono text-xs text-gray-600 bg-white rounded-lg p-2 border">
+                    <span className="truncate">{txResult.txHash}</span>
+                  </div>
+                  <a
+                    href={`https://sepolia.etherscan.io/tx/${txResult.txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    View on Sepolia Etherscan ↗
+                  </a>
+                </div>
               ) : (
-                <p>✗ {txResult.error}</p>
+                <p className="text-red-700">✗ {txResult.error}</p>
               )}
             </div>
           )}
@@ -272,25 +308,31 @@ export default function DApp() {
       {/* Receive tab */}
       {tab === "receive" && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 text-center space-y-3">
-          <p className="text-xs text-gray-500 font-medium">Your Sepolia address</p>
-          <div className="p-3 bg-gray-50 rounded-lg font-mono text-xs break-all text-gray-800">
-            {address}
-          </div>
-          <button
-            onClick={() => { void navigator.clipboard.writeText(address); }}
-            className="text-indigo-600 text-sm hover:underline"
-          >
-            Copy address
-          </button>
-          <div className="pt-1">
-            <a
-              href={`https://sepolia.etherscan.io/address/${address}`}
-              target="_blank" rel="noopener noreferrer"
-              className="text-xs text-gray-400 hover:text-indigo-600"
-            >
-              View on Sepolia Etherscan ↗
-            </a>
-          </div>
+          <p className="text-xs text-gray-500 font-medium">Your Smart Account address</p>
+          {saAddress ? (
+            <>
+              <div className="p-3 bg-gray-50 rounded-lg font-mono text-xs break-all text-gray-800">
+                {saAddress}
+              </div>
+              <button
+                onClick={() => { void navigator.clipboard.writeText(saAddress); }}
+                className="text-indigo-600 text-sm hover:underline"
+              >
+                Copy address
+              </button>
+              <div className="pt-1">
+                <a
+                  href={`https://sepolia.etherscan.io/address/${saAddress}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="text-xs text-gray-400 hover:text-indigo-600"
+                >
+                  View on Sepolia Etherscan ↗
+                </a>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-gray-400">Setting up smart account…</p>
+          )}
         </div>
       )}
 

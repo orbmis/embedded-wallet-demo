@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { authClient, signInWithGoogle, signUpEmail, signInEmail, signOut, getJwt } from "@/lib/auth";
-import { create, sign, recover } from "@/lib/signer";
+import { create, sign, signRaw, recover } from "@/lib/signer";
 import { getSepoliaBalance, verifySignature } from "@/lib/chain";
 import { walletProvider, type PendingRequest } from "@/lib/provider";
 import { formatEther, parseEther, type Hex } from "viem";
@@ -159,19 +159,29 @@ export default function WalletWidget() {
     setApproving(true);
     setError(null);
     try {
-      // personal_sign params: [message, address] or [address, message] — EIP-191 uses hex-encoded message
       const params = pending.params as string[];
-      // Detect param order: if first param starts with 0x and is 42 chars, it's the address
       const isAddrFirst = params[0]?.startsWith("0x") && params[0]?.length === 42;
       const msgHex = isAddrFirst ? params[1] : params[0];
-      const msgStr = msgHex?.startsWith("0x")
-        ? new TextDecoder().decode(Buffer.from(msgHex.slice(2), "hex"))
-        : (msgHex ?? "");
       const jwt = await getJwt();
-      const result = await sign({ jwt, message: msgStr });
-      const raw = result as unknown as Record<string, unknown>;
-      const sig = (raw["signature"] ?? raw["sig"] ?? "") as string;
-      log(`personal_sign: ${trunc(sig, 16)}`);
+      let sig = "";
+
+      // 32-byte hex (66 chars) = ERC-4337 userOpHash — sign the raw bytes so
+      // SimpleAccount's toEthSignedMessageHash().recover() gets the right signer.
+      if (msgHex?.startsWith("0x") && msgHex.length === 66) {
+        const result = await signRaw({ jwt, messageHex: msgHex as Hex });
+        const raw = result as unknown as Record<string, unknown>;
+        sig = (raw["signature"] ?? raw["sig"] ?? "") as string;
+        log(`signRaw (userOpHash): ${trunc(sig, 16)}`);
+      } else {
+        const msgStr = msgHex?.startsWith("0x")
+          ? new TextDecoder().decode(Buffer.from(msgHex.slice(2), "hex"))
+          : (msgHex ?? "");
+        const result = await sign({ jwt, message: msgStr });
+        const raw = result as unknown as Record<string, unknown>;
+        sig = (raw["signature"] ?? raw["sig"] ?? "") as string;
+        log(`personal_sign: ${trunc(sig, 16)}`);
+      }
+
       walletProvider.approvePending(sig);
     } catch (e) {
       setError((e as Error).message);
@@ -210,8 +220,15 @@ export default function WalletWidget() {
 
   if (isPending) return null;
 
+  const isUserOpSign =
+    pending?.method === "personal_sign" &&
+    typeof (pending.params as string[])[0] === "string" &&
+    ((pending.params as string[])[0]?.length === 66 ||
+      (pending.params as string[])[1]?.length === 66);
+
   const pendingLabel = pending
     ? pending.method === "eth_requestAccounts" ? "Connection request"
+    : isUserOpSign ? "Authorize transaction"
     : pending.method === "personal_sign" ? "Sign message"
     : "Send transaction"
     : null;

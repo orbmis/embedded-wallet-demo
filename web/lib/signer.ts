@@ -1,5 +1,6 @@
 "use client";
 import { connect, WindowMessenger } from "penpal";
+import { hexToBytes, type Hex } from "viem";
 
 const IFRAME_URL =
   process.env["NEXT_PUBLIC_IFRAME_URL"] ??
@@ -189,6 +190,32 @@ export async function recover(params: {
   return result;
 }
 
+
+// Signs raw bytes directly — the iframe applies EIP-191 to the 32-byte value.
+// Use this for ERC-4337 userOpHashes where SimpleAccount expects:
+//   keccak256("\x19Ethereum Signed Message:\n32" + rawHash)
+export async function signRaw(params: {
+  jwt: string;
+  messageHex: Hex; // 0x-prefixed 32-byte hash
+}): Promise<SignResult> {
+  const remote = await getConnection();
+  const rawBytes = hexToBytes(params.messageHex);
+  const result = await withTimeout(
+    remote.sign({
+      uuid: uuid(),
+      message: rawBytes,
+      requestConfiguration: {
+        token: params.jwt,
+        thirdPartyProvider: null,
+        thirdPartyTokenType: "jwt",
+        publishableKey: params.jwt,
+        openfortURL: HOT_STORAGE_URL,
+      },
+    }),
+    30000,
+  );
+  return result;
+}
 
 export async function disconnectIframe(): Promise<void> {
   if (_connection) {
