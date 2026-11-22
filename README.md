@@ -332,6 +332,10 @@ This is a local demo, not production-ready:
 - **`iframe?debug=true`** — enables verbose iframe logging. Remove the query string in production.
 - **Pimlico free tier** — has rate limits. Use a paid plan or self-host a bundler for production traffic.
 
+## Production roadmap
+
+See **[PRODUCTION.md](./PRODUCTION.md)** for a full breakdown of what needs to change before this POC becomes a production deployment — covering custodial risk, TLS, secrets management, ERC-4337 upgrades, key rotation, disaster recovery, and compliance.
+
 ## Alternatives and extensions
 
 - **Raw Google ID tokens** — `hot_storage` supports `X-Auth-Provider: google` with `GOOGLE_JWT_AUDIENCE`, bypassing better-auth. Shield would need a separate Google JWK provider. More complex and untested in this demo.
