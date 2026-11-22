@@ -14,9 +14,17 @@ import { publicClient } from "./chain";
 // SimpleAccountFactory v1 — deterministic, same address on all EVM chains
 const FACTORY = "0x9406Cc6185a346906296840746125a0E44976454" as Address;
 
-const BUNDLER_URL =
-  (typeof process !== "undefined" && process.env["NEXT_PUBLIC_PIMLICO_URL"]) ||
-  "https://api.pimlico.io/v2/sepolia/rpc?apikey=public";
+const BUNDLER_URL = process.env["NEXT_PUBLIC_PIMLICO_URL"] ?? "";
+
+function assertBundlerUrl(): string {
+  if (!BUNDLER_URL) {
+    throw new Error(
+      "No bundler URL configured. Add NEXT_PUBLIC_PIMLICO_URL to web/.env.local — " +
+        "get a free key at https://dashboard.pimlico.io",
+    );
+  }
+  return BUNDLER_URL;
+}
 
 export interface SmartAccountSetup {
   saAddress: Address;
@@ -42,15 +50,17 @@ export async function setupSmartAccount(
     entryPoint: ENTRYPOINT_ADDRESS_V06,
   });
 
+  const bundlerUrl = assertBundlerUrl();
+
   const smartAccountClient = createSmartAccountClient({
     account: simpleAccount,
     entryPoint: ENTRYPOINT_ADDRESS_V06,
     chain: sepolia,
-    bundlerTransport: http(BUNDLER_URL),
+    bundlerTransport: http(bundlerUrl),
     middleware: {
       gasPrice: async () => {
         const bc = createPimlicoBundlerClient({
-          transport: http(BUNDLER_URL),
+          transport: http(bundlerUrl),
           entryPoint: ENTRYPOINT_ADDRESS_V06,
         });
         return (await bc.getUserOperationGasPrice()).fast;
