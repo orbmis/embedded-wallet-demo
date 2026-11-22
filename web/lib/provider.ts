@@ -36,7 +36,18 @@ class EIP1193Provider {
   private _listeners = new Map<string, Set<(...args: unknown[]) => void>>();
 
   pendingRequest: PendingRequest | null = null;
-  onPendingRequest: ((req: PendingRequest | null) => void) | null = null;
+  onPendingRequest: ((req: PendingRequest | null) => void) | null = null; // primary (WalletWidget)
+  private _pendingListeners = new Set<(req: PendingRequest | null) => void>();
+
+  addPendingListener(fn: (req: PendingRequest | null) => void): () => void {
+    this._pendingListeners.add(fn);
+    return () => this._pendingListeners.delete(fn);
+  }
+
+  private _notifyPending(req: PendingRequest | null): void {
+    this.onPendingRequest?.(req);
+    this._pendingListeners.forEach(fn => fn(req));
+  }
 
   get accounts() { return [...this._accounts]; }
   get chainId() { return this._chainId; }
@@ -71,7 +82,7 @@ class EIP1193Provider {
   private _queue(method: PendingRequestMethod, params: unknown[]): Promise<unknown> {
     return new Promise((resolve, reject) => {
       this.pendingRequest = { id: crypto.randomUUID(), method, params, resolve, reject };
-      this.onPendingRequest?.(this.pendingRequest);
+      this._notifyPending(this.pendingRequest);
     });
   }
 
@@ -79,14 +90,14 @@ class EIP1193Provider {
     if (!this.pendingRequest) return;
     this.pendingRequest.resolve(result);
     this.pendingRequest = null;
-    this.onPendingRequest?.(null);
+    this._notifyPending(null);
   }
 
   rejectPending(): void {
     if (!this.pendingRequest) return;
     this.pendingRequest.reject({ code: 4001, message: "User rejected the request." });
     this.pendingRequest = null;
-    this.onPendingRequest?.(null);
+    this._notifyPending(null);
   }
 
   on(event: string, fn: (...args: unknown[]) => void): this {
