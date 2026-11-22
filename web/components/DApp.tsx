@@ -260,9 +260,6 @@ export default function DApp() {
                   <p className="text-xs mt-1 text-gray-500">
                     Signature: <span className="font-mono">{txResult.signature?.slice(0, 20)}…</span>
                   </p>
-                  <p className="text-xs mt-1 text-amber-700">
-                    Note: on-chain broadcast requires raw secp256k1 signing — this OpenSigner build uses EIP-191.
-                  </p>
                 </>
               ) : (
                 <p>✗ {txResult.error}</p>
