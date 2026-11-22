@@ -13,7 +13,15 @@ export type PendingRequestMethod =
   | "personal_sign"
   | "eth_sendTransaction";
 
+export interface TransactionDetails {
+  from: string;
+  to: string;
+  valueWei: string;
+  chainId: number;
+}
+
 export interface PendingRequest {
+  transaction?: TransactionDetails;
   id: string;
   method: PendingRequestMethod;
   params: unknown[];
@@ -61,7 +69,7 @@ class EIP1193Provider {
     }
   }
 
-  async request({ method, params = [] }: { method: string; params?: unknown[] }): Promise<unknown> {
+  async request({ method, params = [], transaction }: { method: string; params?: unknown[]; transaction?: TransactionDetails }): Promise<unknown> {
     switch (method) {
       case "eth_chainId":       return this._chainId;
       case "net_version":       return "11155111";
@@ -71,15 +79,15 @@ class EIP1193Provider {
         return this._queue("eth_requestAccounts", params);
       case "personal_sign":
       case "eth_sendTransaction":
-        return this._queue(method as PendingRequestMethod, params);
+        return this._queue(method as PendingRequestMethod, params, transaction);
       default:
         throw { code: 4200, message: `${method} not supported by this wallet` };
     }
   }
 
-  private _queue(method: PendingRequestMethod, params: unknown[]): Promise<unknown> {
+  private _queue(method: PendingRequestMethod, params: unknown[], transaction?: TransactionDetails): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      this.pendingRequest = { id: crypto.randomUUID(), method, params, resolve, reject };
+      this.pendingRequest = { id: crypto.randomUUID(), method, params, resolve, reject, transaction: transaction ? { ...transaction } : undefined };
       this._notifyPending(this.pendingRequest);
     });
   }

@@ -11,7 +11,7 @@ import {
   createPimlicoBundlerClient,
   createPimlicoPaymasterClient,
 } from "permissionless/clients/pimlico";
-import { walletProvider } from "./provider";
+import { walletProvider, type TransactionDetails } from "./provider";
 import { publicClient } from "./chain";
 
 const FACTORY = "0x9406Cc6185a346906296840746125a0E44976454" as Address;
@@ -78,10 +78,17 @@ export async function setupSmartAccount(
 ): Promise<SmartAccountSetup> {
   const bundlerUrl = assertBundlerUrl();
 
+  let transaction: TransactionDetails | undefined;
   const walletClient = createWalletClient({
     account: ownerAddress,
     chain: sepolia,
-    transport: custom(walletProvider),
+    transport: custom({
+      request: ({ method, params }) => walletProvider.request({
+        method,
+        params: params as unknown[] | undefined,
+        transaction: method === "personal_sign" ? transaction : undefined,
+      }),
+    }),
   });
 
   const signer = walletClientToSmartAccountSigner(walletClient);
@@ -117,6 +124,8 @@ export async function setupSmartAccount(
     saAddress: simpleAccount.address,
 
     async send(to: Address, valueWei: bigint): Promise<SendResult> {
+      if (transaction) throw new Error("A transaction is already in progress");
+      transaction = { from: simpleAccount.address, to, valueWei: valueWei.toString(), chainId: sepolia.id };
       try {
         const txHash = await smartAccountClient.sendTransaction({
           to,
@@ -143,6 +152,8 @@ export async function setupSmartAccount(
           }
         }
         throw err;
+      } finally {
+        transaction = undefined;
       }
     },
   };

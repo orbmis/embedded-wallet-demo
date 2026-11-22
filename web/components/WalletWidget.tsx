@@ -49,7 +49,7 @@ function ApprovalModal({
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onReject} />
 
       {/* Card */}
-      <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl animate-slide-up sm:animate-fade-in overflow-hidden">
+      <div className="relative w-full max-w-sm max-h-[90dvh] overflow-y-auto bg-white rounded-2xl shadow-2xl animate-slide-up sm:animate-fade-in">
         {/* Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-4">
           <div className="flex items-center gap-3">
@@ -93,12 +93,38 @@ function ApprovalModal({
           {isUserOpSign && (
             <div className="space-y-2">
               <p className="text-sm text-slate-600">Your wallet is authorizing a transaction you initiated in the dApp.</p>
-              <div className="flex items-center gap-2 bg-indigo-50 rounded-xl p-3 border border-indigo-100">
+              {pending.transaction ? (
+                <dl className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-3 text-sm">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-500">Amount</dt>
+                    <dd className="font-semibold text-slate-900 break-all">{formatEther(BigInt(pending.transaction.valueWei))} ETH</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500 mb-1">From (smart account)</dt>
+                    <dd className="font-mono text-xs text-slate-800 break-all">{pending.transaction.from}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500 mb-1">Recipient</dt>
+                    <dd className="font-mono text-xs text-slate-800 break-all">{pending.transaction.to}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-500">Network</dt>
+                    <dd className="text-slate-800">{pending.transaction.chainId === 11155111 ? "Sepolia" : `Chain ${pending.transaction.chainId}`}</dd>
+                  </div>
+                </dl>
+              ) : (
+                <p className="text-xs text-amber-700">Transfer details are unavailable for this signing request.</p>
+              )}
+              <details className="text-xs text-slate-500">
+                <summary className="cursor-pointer">Signing hash</summary>
+                <p className="mt-2 font-mono break-all">{isAddrFirst ? params[1] : params[0]}</p>
+              </details>
+              {pending.transaction && <div className="flex items-center gap-2 bg-indigo-50 rounded-xl p-3 border border-indigo-100">
                 <svg className="w-4 h-4 text-indigo-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
-                <p className="text-xs text-indigo-700">Gas is sponsored by Pimlico — no ETH needed</p>
-              </div>
+                <p className="text-xs text-indigo-700">Gas fees are sponsored by Pimlico</p>
+              </div>}
             </div>
           )}
 
@@ -156,6 +182,7 @@ function ApprovalModal({
 // ── Main widget ─────────────────────────────────────────────────────────────
 export default function WalletWidget() {
   const { data: session, isPending } = authClient.useSession();
+  const userId = session?.user.id;
 
   const [state,            setState]           = useState<WalletState>("busy");
   const [address,          setAddress]         = useState("");
@@ -213,7 +240,7 @@ export default function WalletWidget() {
   }, []);
 
   const checkWalletState = useCallback(async () => {
-    if (!session?.user) return;
+    if (!userId) return;
     log("checking wallet…");
     try {
       const jwt = await getJwt();
@@ -235,14 +262,15 @@ export default function WalletWidget() {
       log(`check error: ${(e as Error).message}`);
       setState("noWallet");
     }
-  }, [session]);
+  }, [userId]);
 
   useEffect(() => {
     if (isPending) return;
-    if (!session?.user) { setState("signedOut"); return; }
+    if (!userId) { setState("signedOut"); return; }
     setState("busy");
     void checkWalletState();
-  }, [session, isPending, checkWalletState]);
+  // Session refreshes produce new objects; only a user change needs reinitialization.
+  }, [userId, isPending, checkWalletState]);
 
   async function handleCreate() {
     setState("busy"); setError(null);

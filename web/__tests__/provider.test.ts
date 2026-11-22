@@ -6,6 +6,26 @@ afterEach(() => {
 });
 
 describe("wallet approval lifecycle", () => {
+  it("keeps a snapshot of transfer details on the signing request without leaking to the next request", async () => {
+    const transaction = {
+      from: "0x1111111111111111111111111111111111111111",
+      to: "0x2222222222222222222222222222222222222222",
+      valueWei: "1000000000000000",
+      chainId: 11155111,
+    };
+    const result = walletProvider.request({ method: "personal_sign", params: ["0xhash"], transaction });
+    transaction.valueWei = "0";
+    expect(walletProvider.pendingRequest?.transaction).toEqual({
+      ...transaction, valueWei: "1000000000000000",
+    });
+    walletProvider.approvePending("0xsignature");
+    await result;
+    const next = walletProvider.request({ method: "personal_sign", params: ["0xmessage"] });
+    expect(walletProvider.pendingRequest?.transaction).toBeUndefined();
+    walletProvider.approvePending("0xsignature");
+    await next;
+  });
+
   it("notifies every subscriber when an approved request closes", async () => {
     const wallet = vi.fn();
     const dapp = vi.fn();
