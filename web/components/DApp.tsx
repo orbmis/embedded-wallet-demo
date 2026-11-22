@@ -19,6 +19,8 @@ type DAppState = "discover" | "connecting" | "connected";
 interface TxResult {
   ok: boolean;
   txHash?: string;
+  userOpHash?: string; // present when confirmed via manual poll
+  pending?: boolean;   // submitted but unconfirmed after all polling
   error?: string;
 }
 
@@ -28,6 +30,7 @@ export default function DApp() {
   const [ownerAddress, setOwnerAddress] = useState("");
   const [saSetup, setSaSetup] = useState<SmartAccountSetup | null>(null);
   const [saLoading, setSaLoading] = useState(false);
+  const [saError, setSaError] = useState<string | null>(null);
   const [balance, setBalance] = useState("");
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [tab, setTab] = useState<"send" | "receive">("send");
@@ -80,12 +83,15 @@ export default function DApp() {
 
       // Compute ERC-4337 SimpleAccount address from owner key
       setSaLoading(true);
+      setSaError(null);
       try {
         const setup = await setupSmartAccount(getAddress(owner));
         setSaSetup(setup);
         void refreshBalance(setup.saAddress);
-      } catch {
-        // SA setup failed — still show connected, just no send
+      } catch (err) {
+        const msg = (err as Error).message ?? String(err);
+        setSaError(msg);
+        console.error("SA setup:", msg);
       } finally {
         setSaLoading(false);
       }
@@ -116,16 +122,19 @@ export default function DApp() {
     setSending(true);
     setTxResult(null);
     try {
-      const txHash = await saSetup.send(
+      const result = await saSetup.send(
         getAddress(sendTo),
         parseEther(sendAmount),
       );
-      setTxResult({ ok: true, txHash });
+      setTxResult({ ok: true, txHash: result.txHash, userOpHash: result.userOpHash });
       void refreshBalance(saSetup.saAddress);
     } catch (err: unknown) {
-      const e = err as { code?: number; message?: string };
+      const e = err as { code?: number; message?: string; userOpHash?: string };
       if (e.code === 4001) {
         setTxResult({ ok: false, error: "Rejected." });
+      } else if (e.userOpHash) {
+        // Submitted but timed out — surface it as pending
+        setTxResult({ ok: true, pending: true, userOpHash: e.userOpHash });
       } else {
         setTxResult({ ok: false, error: e.message ?? "Unknown error" });
       }
@@ -193,9 +202,9 @@ export default function DApp() {
                 <p className="text-sm font-mono font-medium">
                   {saAddress.slice(0, 10)}…{saAddress.slice(-6)}
                 </p>
-              ) : (
-                <p className="text-xs text-red-400">SA setup failed</p>
-              )}
+              ) : saError ? (
+                <p className="text-xs text-red-500 max-w-[180px] truncate" title={saError}>{saError}</p>
+              ) : null}
             </div>
           </div>
           <div className="text-right">
@@ -284,18 +293,32 @@ export default function DApp() {
             <div className={`mt-4 p-3 rounded-xl text-sm ${txResult.ok ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
               {txResult.ok ? (
                 <div className="space-y-2">
-                  <p className="font-medium text-green-800">✓ Transaction confirmed</p>
-                  <div className="flex items-center gap-2 font-mono text-xs text-gray-600 bg-white rounded-lg p-2 border">
-                    <span className="truncate">{txResult.txHash}</span>
-                  </div>
-                  <a
-                    href={`https://sepolia.etherscan.io/tx/${txResult.txHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-                  >
-                    View on Sepolia Etherscan ↗
-                  </a>
+                  <p className="font-medium text-green-800">
+                    {txResult.pending ? "⏳ Transaction submitted" : "✓ Transaction confirmed"}
+                  </p>
+                  {txResult.txHash && (
+                    <>
+                      <div className="font-mono text-xs text-gray-600 bg-white rounded-lg p-2 border truncate">
+                        {txResult.txHash}
+                      </div>
+                      <a
+                        href={`https://sepolia.etherscan.io/tx/${txResult.txHash}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      >
+                        View on Sepolia Etherscan ↗
+                      </a>
+                    </>
+                  )}
+                  {txResult.userOpHash && (
+                    <a
+                      href={`https://jiffyscan.xyz/userOpHash/${txResult.userOpHash}?network=sepolia`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium"
+                    >
+                      Track UserOp on JiffyScan ↗
+                    </a>
+                  )}
                 </div>
               ) : (
                 <p className="text-red-700">✗ {txResult.error}</p>
